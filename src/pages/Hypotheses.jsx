@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Check, X as XIcon, Plus, Play, CheckCircle2 } from 'lucide-react'
-import { supabase } from '../services/supabase'
+import { API_BASE_URL } from '../config/api'
 import { useClient } from '../context/ClientContext'
 import { useAuth } from '../context/AuthContext'
 import { StatusBadge } from '../components/Common/StatusBadge'
@@ -33,13 +33,9 @@ export default function Hypotheses() {
   const fetchHypotheses = async () => {
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from('hypotheses')
-        .select('*')
-        .eq('client_id', selectedClient.id)
-        .order('created_at', { ascending: false })
-      
-      if (error) throw error
+      const res = await fetch(`${API_BASE_URL}/hypotheses/${selectedClient.id}`)
+      if (!res.ok) throw new Error('Failed to fetch hypotheses')
+      const data = await res.json()
       setHypotheses(data || [])
     } catch (err) {
       console.error(err)
@@ -51,14 +47,19 @@ export default function Hypotheses() {
   const handleAddManual = async (e) => {
     e.preventDefault()
     try {
-      const { error } = await supabase.from('hypotheses').insert([{
+      const payload = {
         ...formData,
         client_id: selectedClient.id,
         source: 'manual',
         status: 'draft',
         created_by: user.id
-      }])
-      if (error) throw error
+      }
+      const res = await fetch(`${API_BASE_URL}/hypotheses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      if (!res.ok) throw new Error('Failed to create hypothesis')
       setIsFormOpen(false)
       setFormData({ title: '', description: '', mitre_id: '', mitre_tactic: '', splunk_query: '' })
       fetchHypotheses()
@@ -69,12 +70,12 @@ export default function Hypotheses() {
 
   const handleApprove = async (id) => {
     try {
-      const { error } = await supabase.from('hypotheses').update({
-        status: 'approved',
-        approved_at: new Date().toISOString(),
-        approved_by: user.id
-      }).eq('id', id)
-      if (error) throw error
+      const res = await fetch(`${API_BASE_URL}/hypotheses/${id}/approve`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id })
+      })
+      if (!res.ok) throw new Error('Failed to approve')
       fetchHypotheses()
     } catch (err) {
       alert('Error approving: ' + err.message)
@@ -83,19 +84,12 @@ export default function Hypotheses() {
 
   const handleReject = async () => {
     try {
-      const { error } = await supabase.from('hypotheses').update({
-        status: 'rejected', // Note: status enum only allows 'draft','approved','running','complete'. Wait, user prompt didn't specify rejected status. Let's assume we delete it or just set rejected_reason. Let's delete it for now or just update rejected_reason and keep as draft? 
-        // Ah, if the schema check fails for 'rejected', let's delete it or mark it complete. 
-        // Actually, if we reject, it might be better to just delete it. But since they added rejected_reason, maybe they meant to keep it.
-        // I will just delete it, or update to 'draft' with rejected_reason. 
-        // Let's change the status constraint or just delete it. 
-        // For now, I'll delete it to keep it simple, but store the reason if they wanted an audit trail. 
-        // Wait, if it's an audit trail, we can't delete. Let's just update rejected_reason. Since 'rejected' is not in the check constraint ('draft', 'approved', 'running', 'complete').
-        // Let's change status to 'complete' and set rejected_reason.
-        rejected_reason: rejectReason,
-        status: 'complete' 
-      }).eq('id', rejectingHypo.id)
-      if (error) throw error
+      const res = await fetch(`${API_BASE_URL}/hypotheses/${rejectingHypo.id}/reject`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: rejectReason })
+      })
+      if (!res.ok) throw new Error('Failed to reject')
       setRejectingHypo(null)
       setRejectReason('')
       fetchHypotheses()
@@ -106,8 +100,12 @@ export default function Hypotheses() {
 
   const updateStatus = async (id, newStatus) => {
     try {
-      const { error } = await supabase.from('hypotheses').update({ status: newStatus }).eq('id', id)
-      if (error) throw error
+      const res = await fetch(`${API_BASE_URL}/hypotheses/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      })
+      if (!res.ok) throw new Error('Failed to update status')
       fetchHypotheses()
     } catch (err) {
       alert('Error updating status: ' + err.message)

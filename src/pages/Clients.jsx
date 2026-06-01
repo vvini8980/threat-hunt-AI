@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Plus, Edit2, Key, X } from 'lucide-react'
-import { supabase } from '../services/supabase'
+import { API_BASE_URL } from '../config/api'
 import { useAuth } from '../context/AuthContext'
 import { useClient } from '../context/ClientContext'
 
@@ -25,8 +25,9 @@ export default function Clients() {
   const fetchClientsList = async () => {
     try {
       setLoading(true)
-      const { data, error } = await supabase.from('clients').select('*').order('name')
-      if (error) throw error
+      const res = await fetch(`${API_BASE_URL}/clients`)
+      if (!res.ok) throw new Error('Failed to fetch clients')
+      const data = await res.json()
       setLocalClients(data || [])
     } catch (err) {
       console.error(err)
@@ -61,11 +62,19 @@ export default function Clients() {
     e.preventDefault()
     try {
       if (editingClient) {
-        const { error } = await supabase.from('clients').update(formData).eq('id', editingClient.id)
-        if (error) throw error
+        const res = await fetch(`${API_BASE_URL}/clients/${editingClient.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
+        })
+        if (!res.ok) throw new Error('Failed to update client')
       } else {
-        const { error } = await supabase.from('clients').insert([formData])
-        if (error) throw error
+        const res = await fetch(`${API_BASE_URL}/clients`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
+        })
+        if (!res.ok) throw new Error('Failed to create client')
       }
       setIsModalOpen(false)
       fetchClientsList()

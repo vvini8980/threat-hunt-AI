@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { FileDown, Calendar as CalendarIcon, ShieldAlert, CheckCircle, ShieldQuestion } from 'lucide-react'
-import { supabase } from '../services/supabase'
+import { API_BASE_URL } from '../config/api'
 import { useClient } from '../context/ClientContext'
 import jsPDF from 'jspdf'
 import 'jspdf-autotable'
@@ -22,25 +22,21 @@ export default function HuntResults() {
   const fetchResults = async () => {
     try {
       setLoading(true)
-      let query = supabase
-        .from('hunt_results')
-        .select(`
-          *,
-          hypotheses ( title )
-        `)
-        .eq('client_id', selectedClient.id)
-        .order('executed_at', { ascending: false })
+      const res = await fetch(`${API_BASE_URL}/hunt/results/${selectedClient.id}`)
+      if (!res.ok) throw new Error('Failed to fetch results')
+      let data = await res.json()
 
       if (dateFilter) {
-        // Simple date filter: exactly on that date (local time bounds)
         const start = new Date(dateFilter)
         const end = new Date(dateFilter)
         end.setDate(end.getDate() + 1)
-        query = query.gte('executed_at', start.toISOString()).lt('executed_at', end.toISOString())
+        
+        data = data.filter(r => {
+          const t = new Date(r.executed_at)
+          return t >= start && t < end
+        })
       }
 
-      const { data, error } = await query
-      if (error) throw error
       setResults(data || [])
     } catch (err) {
       console.error(err)

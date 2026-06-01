@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { FileDown, FileSpreadsheet, Filter } from 'lucide-react'
-import { supabase } from '../services/supabase'
+import { API_BASE_URL } from '../config/api'
 import { useClient } from '../context/ClientContext'
 import jsPDF from 'jspdf'
 import 'jspdf-autotable'
@@ -23,18 +23,14 @@ export default function IOCReports() {
   const fetchIOCs = async () => {
     try {
       setLoading(true)
-      let query = supabase
-        .from('ioc_reports')
-        .select('*')
-        .eq('client_id', selectedClient.id)
-        .order('report_date', { ascending: false })
+      const res = await fetch(`${API_BASE_URL}/ioc/${selectedClient.id}`)
+      if (!res.ok) throw new Error('Failed to fetch IOCs')
+      let data = await res.json()
 
       if (typeFilter !== 'all') {
-        query = query.eq('ioc_type', typeFilter)
+        data = data.filter(ioc => ioc.ioc_type === typeFilter)
       }
 
-      const { data, error } = await query
-      if (error) throw error
       setIocs(data || [])
     } catch (err) {
       console.error(err)
