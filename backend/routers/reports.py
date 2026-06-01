@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from services.supabase_client import supabase
-from services.report_generator import generate_hunt_report, generate_ioc_report
+from services.report_generator import generate_hunt_report, generate_ioc_reports, build_ioc_report
 from services.email_service import send_report_email
 import datetime
 
@@ -50,17 +50,12 @@ def create_ioc_report(client_id: str):
     if not supabase: return {"status": "mocked success"}
     
     try:
-        res = supabase.table("ioc_reports").select("*").eq("client_id", client_id).execute()
-        iocs = []
-        for row in res.data:
-            iocs.append({
-                "type": row.get("ioc_type", "Unknown"),
-                "value": row.get("value", "Unknown"),
-                "confidence": row.get("confidence", "Unknown")
-            })
-            
-        pdf_path = generate_ioc_report(client_id, iocs)
-        file_url = f"https://mock-storage.local/{pdf_path}"
+        date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        report_data = build_ioc_report(client_id, date_str)
+        files = generate_ioc_reports(client_id, date_str, report_data)
+        pdf_path = files.get("pdf", "unknown.pdf")
+        
+        file_url = f"https://mock-storage.local/{os.path.basename(pdf_path)}"
         
         record = {
             "client_id": client_id,
