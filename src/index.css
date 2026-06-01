@@ -1,0 +1,102 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+:root {
+  /* Sleek Deep Slate/Indigo Dark Mode */
+  --bg-base: #020617; /* Slate 950 */
+  --bg-surface: #0f172a; /* Slate 900 */
+  --bg-glass: rgba(15, 23, 42, 0.7); /* Translucent Slate 900 */
+  
+  --accent-primary: #3b82f6; /* Blue 500 */
+  --accent-secondary: #6366f1; /* Indigo 500 */
+  --accent-glow: rgba(59, 130, 246, 0.5);
+  
+  --color-border: #1e293b; /* Slate 800 */
+  --color-border-glass: rgba(255, 255, 255, 0.05);
+  --color-muted: #334155; /* Slate 700 */
+
+  --semantic-pending: #f59e0b; /* Amber */
+  --semantic-completed: #10b981; /* Emerald */
+  --semantic-critical: #ef4444; /* Red */
+  --semantic-inactive: #475569; /* Slate 600 */
+  
+  --text-primary: #f8fafc; /* Slate 50 */
+  --text-secondary: #94a3b8; /* Slate 400 */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Outfit", sans-serif;
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.08) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted) var(--bg-base);
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-muted);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-slide-right {
+  animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Glassmorphism utilities */
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-glass);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+input[type="date"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.7);
+  cursor: pointer;
+}

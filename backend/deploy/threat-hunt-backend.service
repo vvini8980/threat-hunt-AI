@@ -1,0 +1,13 @@
+[Unit]
+Description=Gunicorn instance to serve Threat Hunt Backend
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=/home/ubuntu/threat-hunt-AI/backend
+Environment="PATH=/home/ubuntu/threat-hunt-AI/backend/venv/bin"
+ExecStart=/home/ubuntu/threat-hunt-AI/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+
+[Install]
+WantedBy=multi-user.target

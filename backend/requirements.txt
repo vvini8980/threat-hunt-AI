@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+supabase
+requests
+reportlab
+python-dotenv
+pydantic
+google-generativeai
