@@ -27,16 +27,27 @@ export const ClientProvider = ({ children }) => {
       setLoading(true);
       const { data, error } = await supabase
         .from('clients')
-        .select('id, name')
+        .select('*')
         .order('name');
       
       if (error) throw error;
       
-      setClients(data || []);
+      const updatedClients = data || [];
+      setClients(updatedClients);
       
-      // Select first client by default if none selected
-      if (data && data.length > 0 && !selectedClient) {
-        setSelectedClient(data[0]);
+      if (updatedClients.length > 0) {
+        if (!selectedClient) {
+          setSelectedClient(updatedClients[0]);
+        } else {
+          const fresh = updatedClients.find(c => c.id === selectedClient.id);
+          if (fresh) {
+            setSelectedClient(fresh);
+          } else {
+            setSelectedClient(updatedClients[0]);
+          }
+        }
+      } else {
+        setSelectedClient(null);
       }
     } catch (err) {
       console.error('Error fetching clients:', err);

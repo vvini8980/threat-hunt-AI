@@ -1,0 +1,16 @@
+{
+  "date": "2026-06-09",
+  "generated_at": "2026-06-10T14:54:27.455397",
+  "report_for": "2026-06-09",
+  "ioc_count": 0,
+  "actor_count": 0,
+  "attack_count": 0,
+  "type_breakdown": {},
+  "top_iocs": [],
+  "actors": [],
+  "campaigns": [],
+  "high_confidence_count": 0,
+  "summary": "Daily Proactive Intel Report covering 0 active threat campaigns, 0 unique IOCs across 0 threat actors. Breakdown: . No actor attribution available.",
+  "download_url": null,
+  "source": "no_data"
+}

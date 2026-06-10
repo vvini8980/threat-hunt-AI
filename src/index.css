@@ -70,17 +70,70 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulseSlow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 .animate-slide-right {
   animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-@keyframes slideInRight {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+.animate-pulse-slow {
+  animation: pulseSlow 2.5s ease-in-out infinite;
+}
+
+/* Glass panel glow variants */
+.glass-panel-blue {
+  background: rgba(59, 130, 246, 0.04);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.04), 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.glass-panel-emerald {
+  background: rgba(16, 185, 129, 0.04);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(16, 185, 129, 0.12);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.04), 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.glass-panel-red {
+  background: rgba(239, 68, 68, 0.04);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.04), 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
 }
 
 /* Glassmorphism utilities */
@@ -99,4 +152,37 @@ input[type="date"] {
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1) brightness(0.7);
   cursor: pointer;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  color: white;
+  font-weight: 700;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.markdown-body h2 { font-size: 1.25rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.3em; }
+.markdown-body h3 { font-size: 1.1rem; color: #10b981; }
+.markdown-body p { margin-bottom: 1em; }
+.markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  background: rgba(0,0,0,0.3);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 0.75em 1em;
+  text-align: left;
+}
+.markdown-body th { background: rgba(255,255,255,0.05); color: #10b981; font-weight: 600; }
+.markdown-body code {
+  background: rgba(16,185,129,0.1);
+  color: #34d399;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.9em;
 }

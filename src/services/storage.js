@@ -87,7 +87,7 @@ export const getAllHypotheses = async () => {
   try {
     const { data, error } = await supabase
       .from('hypotheses')
-      .select('*, comments(*)');
+      .select('*');
       
     if (error) {
       console.error('Supabase error fetching hypotheses:', error);
@@ -116,7 +116,7 @@ export const getAllHypotheses = async () => {
 export const getHypothesisById = async (id) => {
   const { data, error } = await supabase
     .from('hypotheses')
-    .select('*, comments(*)')
+    .select('*')
     .eq('id', id)
     .single();
     
@@ -328,7 +328,7 @@ export const getAllAssignments = async () => {
   try {
     const { data, error } = await supabase
       .from('assignments')
-      .select('*, hypotheses(*, comments(*))');
+      .select('*, hypotheses(*)');
       
     if (error) {
       console.error('Supabase error fetching assignments:', error);
@@ -345,7 +345,7 @@ export const getAllAssignments = async () => {
 export const getAssignmentById = async (id) => {
   const { data, error } = await supabase
     .from('assignments')
-    .select('*, hypotheses(*, comments(*))')
+    .select('*, hypotheses(*)')
     .eq('id', id)
     .single();
     

@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.ioc_reports (
   confidence TEXT,
   threat_actor TEXT,
   source TEXT,
+  ai_summary TEXT,
   report_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -84,3 +85,14 @@ CREATE TABLE IF NOT EXISTS public.reports (
 );
 
 -- NOTE: Row Level Security (RLS) is disabled so you can test the UI without configuring Authentication first.
+
+-- 9. Create pipeline_logs table
+CREATE TABLE IF NOT EXISTS public.pipeline_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  crew_type TEXT NOT NULL,
+  status TEXT CHECK (status IN ('started', 'success', 'failed')),
+  error_msg TEXT,
+  run_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+

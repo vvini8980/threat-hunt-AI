@@ -7,10 +7,12 @@ import { useClient } from '../../context/ClientContext'
 const pageNames = [
   { match: (pathname) => pathname === '/', name: 'Dashboard' },
   { match: (pathname) => pathname === '/clients', name: 'Clients' },
+  { match: (pathname) => pathname === '/ai-hub', name: 'Proactive Threat Intel' },
   { match: (pathname) => pathname === '/hypotheses', name: 'Hypotheses' },
   { match: (pathname) => pathname === '/results', name: 'Hunt Results' },
   { match: (pathname) => pathname === '/ioc-reports', name: 'IOC Reports' },
   { match: (pathname) => pathname === '/reports', name: 'Reports' },
+  { match: (pathname) => pathname === '/pipeline', name: 'Pipeline Health' },
   { match: (pathname) => pathname === '/settings', name: 'Settings' },
 ]
 
@@ -19,7 +21,7 @@ function TopBar({ toggleSidebar }) {
   const { clients, selectedClient, setSelectedClient, loading } = useClient()
 
   const pageName =
-    pageNames.find((item) => item.match(pathname))?.name ?? 'MDR Platform'
+    pageNames.find((item) => item.match(pathname))?.name ?? 'ThreatHunt AI'
 
   const currentDate = useMemo(
     () =>

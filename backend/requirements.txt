@@ -6,3 +6,10 @@ reportlab
 python-dotenv
 pydantic
 google-generativeai
+crewai
+crewai-tools
+langchain-google-genai
+apscheduler
+
+azure-identity
+azure-monitor-query

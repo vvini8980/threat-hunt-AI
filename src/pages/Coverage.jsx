@@ -39,14 +39,14 @@ function Coverage() {
   }
 
   return (
-    <section className="min-h-full bg-bg-primary p-6 text-white relative">
+    <section className="min-h-full p-6 text-textprimary relative">
       {/* Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
+          <h2 className="text-2xl font-bold flex items-center gap-2 text-textprimary">
             🗺️ MITRE ATT&CK Coverage Map
           </h2>
-          <p className="mt-1 text-sm text-gray-400">Click any technique to see hypotheses</p>
+          <p className="mt-1 text-sm text-textsecondary">Click any technique to see hypotheses</p>
         </div>
         
         {/* Legend & Controls */}
@@ -55,14 +55,13 @@ function Coverage() {
             onClick={() => setShowOnlyCovered(!showOnlyCovered)}
             className={`px-4 py-2 rounded-lg text-sm font-bold border transition-all ${
               showOnlyCovered 
-                ? 'bg-indigo-500 text-white border-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.5)]'
-                : 'bg-[#1a1d27] text-gray-400 border-[#2a2d3e] hover:text-white'
+                ? 'bg-accent-primary text-bg-base border-accent-primary shadow-[0_0_10px_rgba(99,102,241,0.5)]'
+                : 'bg-bg-primary text-textsecondary border-glass hover:text-textprimary'
             }`}
           >
             {showOnlyCovered ? '👁️ Showing Covered Only' : '👁️ Show Covered Only'}
           </button>
-          
-          <div className="flex flex-wrap items-center justify-center gap-3 rounded-lg border border-[#2a2d3e] bg-[#1a1d27] px-4 py-2 text-sm font-medium">
+          <div className="flex flex-wrap items-center justify-center gap-3 rounded-lg border border-glass bg-bg-primary px-4 py-2 text-sm font-medium">
             <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-green-500"></span> TP Found</div>
             <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-blue-500"></span> FP Only</div>
             <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm bg-yellow-500"></span> Planned</div>
@@ -73,14 +72,14 @@ function Coverage() {
       </div>
 
       {/* Coverage Score Bar */}
-      <div className="mb-8 rounded-xl border border-[#2a2d3e] bg-[#1a1d27] p-5">
+      <div className="mb-8 rounded-xl border border-glass bg-bg-primary p-5 shadow-sm">
         <div className="mb-2 flex items-center justify-between text-sm font-medium">
-          <span className="text-white">Coverage: {coverageStats.covered} of {coverageStats.total} techniques hunted</span>
-          <span className="text-indigo-400">{coverageStats.percentage}%</span>
+          <span className="text-textprimary">Coverage: {coverageStats.covered} of {coverageStats.total} techniques hunted</span>
+          <span className="text-accent-primary">{coverageStats.percentage}%</span>
         </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-[#2a2d3e]">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-glass">
           <div 
-            className="h-full rounded-full bg-indigo-500 transition-all duration-500" 
+            className="h-full rounded-full bg-accent-primary transition-all duration-500" 
             style={{ width: `${coverageStats.percentage}%` }}
           />
         </div>

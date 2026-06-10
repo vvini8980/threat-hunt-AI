@@ -1,56 +1,302 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { generateThreatIntel } from '../services/geminiService';
+import { API_BASE_URL } from '../config/api';
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const STORAGE_KEYS = {
+  ATTACKS:        'thboard_live_attacks',
+  LIBRARY:        'thboard_saved_library',
+  DAILY_REPORT:   'thboard_daily_report',
+  LAST_DAILY_RUN: 'thboard_last_daily_run',
+};
+
+const LIVE_REFRESH_INTERVAL_MS = 3_600_000;
+
+function todayDateStr() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function yesterdayDateStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+/** Aggregate all IOCs from an array of attacks */
+function aggregateIOCs(attacks) {
+  const map = new Map();
+  attacks.forEach(atk => {
+    (atk.iocs || []).forEach(ioc => {
+      const typeKey = ioc.type?.toUpperCase() || 'UNKNOWN';
+      const normType =
+        typeKey === 'IP' || typeKey === 'IP ADDRESS' ? 'IP' :
+        typeKey === 'DOMAIN' || typeKey === 'HOSTNAME' ? 'DOMAIN' :
+        typeKey === 'HASH' || typeKey === 'MD5' || typeKey === 'SHA256' || typeKey === 'SHA-256' ? 'HASH' :
+        typeKey;
+      const key = `${normType}::${ioc.value}`;
+      if (!map.has(key)) {
+        map.set(key, { type: normType, value: ioc.value, context: ioc.context || '', campaigns: [] });
+      }
+      map.get(key).campaigns.push(atk.metadata?.actor || atk.name || 'Unknown');
+    });
+  });
+  return Array.from(map.values());
+}
+
+/** Build a daily intel report object from the current state of attacks */
+function buildDailyReport(attacks, targetDateStr = yesterdayDateStr()) {
+  const getAttackDateStr = (attack) => {
+    const value = attack.generated_at || attack.date;
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    const match = String(value).match(/^\d{4}-\d{2}-\d{2}/);
+    return match ? match[0] : null;
+  };
+
+  // Filter for attacks on the target date
+  let recentAttacks = attacks.filter(a => {
+    const dateStr = getAttackDateStr(a);
+    return dateStr === targetDateStr;
+  });
+
+  // Fallback if none for the target date, take the most recent day available
+  if (recentAttacks.length === 0 && attacks.length > 0) {
+    const sorted = [...attacks]
+      .filter(a => getAttackDateStr(a) !== null)
+      .sort((a, b) => new Date(b.generated_at || b.date).getTime() - new Date(a.generated_at || a.date).getTime());
+    
+    if (sorted.length > 0) {
+      const mostRecentDateStr = getAttackDateStr(sorted[0]);
+      recentAttacks = sorted.filter(a => getAttackDateStr(a) === mostRecentDateStr);
+      targetDateStr = mostRecentDateStr;
+    }
+  }
+
+  const iocs = aggregateIOCs(recentAttacks);
+  const actors = [...new Set(recentAttacks.map(a => a.metadata?.actor).filter(Boolean))];
+  
+  return {
+    id:           `report-${Date.now()}`,
+    generated_at: new Date().toISOString(),
+    date:         todayDateStr(),
+    report_for:   targetDateStr,
+    attack_count: recentAttacks.length,
+    ioc_count:    iocs.length,
+    actor_count:  actors.length,
+    top_iocs:     iocs.slice(0, 10),
+    actors,
+    campaigns:    recentAttacks,
+    summary: `Daily Proactive Intel Report covering ${recentAttacks.length} active threat campaign${recentAttacks.length !== 1 ? 's' : ''}, `
+           + `${iocs.length} unique IOC${iocs.length !== 1 ? 's' : ''} across ${actors.length} threat actor${actors.length !== 1 ? 's' : ''}. `
+           + (actors.length > 0 ? `Key actors: ${actors.slice(0, 3).join(', ')}${actors.length > 3 ? ` and ${actors.length - 3} more` : ''}.` : ''),
+    download_url: null,
+  };
+}
+
+// ─── Seed campaign (used only when OpenCTI is empty & no cache) ──────────────
+const SEED_CAMPAIGN = {
+  id: 'seed-001',
+  name: 'Volt Typhoon: Living off the Land (LotL) targeting Critical Infrastructure',
+  date: '2026-05-24',
+  generated_at: '2026-05-24T14:30:00.000Z',
+  metadata: {
+    actor: 'Volt Typhoon',
+    aliases: 'Bronze Silhouette, DEV-0391, VANGUARD PANDA',
+    origin: 'China (PRC sponsored)',
+    activeSince: '2021 (confirmed 2023)',
+    targetSector: 'Critical Infrastructure (Energy/Water/Comms/OT)',
+    dwellTime: '300+ days average',
+    sophistication: 'Nation State',
+    cisaAlert: 'AA23-144A (May 2023)',
+    confidence: 'HIGH 94% (CISA Confirmed)',
+  },
+  poc: {
+    hypothesis: `PHASE 1 — Initial Access:\nExploits Fortinet FortiGuard SSL VPN CVE-2022-40684 or Zoho ManageEngine CVE-2021-40539.\n\nPHASE 2 — Discovery (cmd.exe ONLY, never PowerShell):\n  net group /domain\n  net user /domain\n  netstat -ano\n  ipconfig /all\n\nPHASE 3 — Credential Access:\n  ntdsutil "ac i ntds" "ifm" "create full c:\\temp" q q\n(ntdsutil IFM = Volt Typhoon signature — other actors use vssadmin)\n\nPHASE 4 — C2:\nProxies ALL traffic through compromised SOHO routers (no SNI headers).\n\nPHASE 5 — Persistence:\n  netsh interface portproxy add v4tov4 listenport=50100 connectaddress=[C2] connectport=443`,
+    logSources: [
+      { source: 'Sysmon EID 1', indicator: "ntdsutil.exe with 'ifm' arg", query: 'ProcessName=ntdsutil.exe CommandLine=*ifm* CommandLine=*create full*' },
+      { source: 'Sysmon EID 1', indicator: 'netsh portproxy v4tov4', query: 'ProcessName=netsh.exe CommandLine=*portproxy* CommandLine=*v4tov4*' },
+      { source: 'Windows EID 4688', indicator: 'net commands in sequence', query: 'EventCode=4688 sequence within 300 seconds' },
+    ],
+    huntingSteps: [
+      { step: 'Identify ntdsutil IFM extraction', description: 'Look for ntdsutil.exe executing ifm create full — this dumps the AD database.' },
+      { step: 'Search for unauthorized port proxies', description: 'Hunt for netsh.exe configuring v4tov4 proxies to bypass segmentation.' },
+      { step: 'Analyze for SNI-less TLS', description: 'Detect outbound TLS to residential IPs without Server Name Indication headers.' },
+      { step: 'Correlate with initial access vectors', description: 'Check perimeter logs for Fortinet CVE-2022-40684 exploitation.' },
+    ],
+    triageQuery: `index=windows sourcetype=sysmon earliest=-7d\n(\n  (EventCode=1 ProcessName="*\\ntdsutil.exe" CommandLine="*ifm*" CommandLine="*create full*")\n  OR\n  (EventCode=1 ProcessName="*\\netsh.exe" CommandLine="*portproxy*" CommandLine="*v4tov4*")\n)\n| eval technique=case(ProcessName="*ntdsutil*","T1003.003",ProcessName="*netsh*","T1090.001",true(),"Unknown")\n| stats count, values(technique) as ttps, values(CommandLine) as commands by host, user\n| sort -count`,
+    falsePositives: 'ntdsutil ifm: Almost never a FP outside of dedicated DC backup jobs. netsh portproxy: Check IT tickets for legacy app NAT traversal.',
+  },
+  references: [
+    'https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-038a',
+    'https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon/',
+  ],
+  iocs: [
+    { type: 'IP', value: '45.32.108.91', context: 'Compromised SOHO router C2 proxy' },
+    { type: 'Command', value: 'ntdsutil "ac i ntds" "ifm" "create full c:\\temp" q q', context: 'NTDS.dit extraction signature' },
+    { type: 'Command', value: 'netsh interface portproxy add v4tov4 listenport=50100', context: 'C2 tunnel persistence' },
+  ],
+  hypotheses: [
+    {
+      hypoName: 'Detect ntdsutil.exe AD Database Extraction',
+      description: 'Volt Typhoon uniquely uses ntdsutil.exe IFM to dump NTDS.dit — never vssadmin.',
+      mitreId: 'T1003.003', tactic: 'Credential Access', platform: 'Windows',
+      dataSource: 'Process Creation (Sysmon EID 1)',
+      actorContext: 'Phase 3 of Volt Typhoon chain. ntdsutil IFM is their signature — other actors use vssadmin.',
+      confidence: 'HIGH 94%', source: 'CISA AA23-144A', lastSeen: 'Active May 2026',
+      huntingLogic: '1. Run query last 90 days\n2. Exclude known backup servers\n3. Correlate with VPN auth logs ±48h\n4. HIGH CONFIDENCE = escalate immediately',
+      falsePositiveRisk: 'LOW — ntdsutil ifm is rarely used legitimately.',
+      truePositiveAction: '🚨 Escalate to IR immediately\n🚨 Assume full AD compromise\n🚨 Reset ALL domain admin passwords',
+      splunkSPL: 'index=windows (sourcetype="WinEventLog:Security" EventCode=4688 OR sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=1)\nProcessName="*\\ntdsutil.exe" CommandLine="*ifm create full*"\n| stats count by host, user, CommandLine, _time | sort -_time',
+      sentinelKQL: 'SecurityEvent\n| where EventID == 4688\n| where NewProcessName endswith "ntdsutil.exe"\n| where CommandLine has "ifm" and CommandLine has "create full"\n| project TimeGenerated, Computer, Account, NewProcessName, CommandLine\n| order by TimeGenerated desc',
+    },
+  ],
+};
+
+// ─── Main Hook ───────────────────────────────────────────────────────────────
 export const useAIHub = () => {
   const [attacks, setAttacks] = useState(() => {
     try {
-      const saved = localStorage.getItem('thboard_live_attacks');
+      const saved = localStorage.getItem(STORAGE_KEYS.ATTACKS);
       return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-  const [isFetching, setIsFetching] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [savedLibrary, setSavedLibrary] = useState(() => {
-    try {
-      const saved = localStorage.getItem('thboard_saved_library');
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch (e) {
-      return new Set();
-    }
+    } catch { return []; }
   });
 
+  const [isFetching,   setIsFetching]   = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [lastUpdated,  setLastUpdated]  = useState(null);
+
+  const [savedLibrary, setSavedLibrary] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.LIBRARY);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  const [dailyReport,       setDailyReport]       = useState(() => {
+    try {
+      const r = localStorage.getItem(STORAGE_KEYS.DAILY_REPORT);
+      return r ? JSON.parse(r) : null;
+    } catch { return null; }
+  });
+  const [isDailyGenerating, setIsDailyGenerating] = useState(false);
+
+  const midnightTimerRef = useRef(null);
+  const feedFetchInFlightRef = useRef(false);
+
+  // ── Save hypothesis to local tracking ─────────────────────────────────────
   const saveHypothesis = useCallback((hypo) => {
     setSavedLibrary(prev => {
       const next = new Set([...prev, hypo.hypoName]);
-      localStorage.setItem('thboard_saved_library', JSON.stringify(Array.from(next)));
+      localStorage.setItem(STORAGE_KEYS.LIBRARY, JSON.stringify(Array.from(next)));
       return next;
     });
   }, []);
 
-  const generateLiveAttack = useCallback(async (rawText) => {
+  // ── Fetch daily report from backend cache ──────────────────────────────────
+  const fetchDailyReport = useCallback(async () => {
+    const yesterday = yesterdayDateStr();
+    try {
+      const res = await fetch(`${API_BASE_URL}/intel/daily-report/${yesterday}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'success' && data.report) {
+          const report = { ...data.report, generated_at: data.report.generated_at || new Date().toISOString() };
+          localStorage.setItem(STORAGE_KEYS.DAILY_REPORT, JSON.stringify(report));
+          localStorage.setItem(STORAGE_KEYS.LAST_DAILY_RUN, todayDateStr());
+          setDailyReport(report);
+          return report;
+        }
+      }
+    } catch (err) {
+      console.warn('[Daily Report] Failed to fetch daily report from backend:', err.message);
+    }
+    return null;
+  }, []);
+
+  // ── Generate daily IOC + intel report ─────────────────────────────────────
+  const generateDailyReport = useCallback(async (currentAttacks, force = false) => {
+    setIsDailyGenerating(true);
+    try {
+      // First try the real backend endpoint
+      try {
+        const openctiUrl = localStorage.getItem('ai_opencti_url') || '';
+        const openctiKey = localStorage.getItem('ai_opencti_key') || '';
+        
+        const url = `${API_BASE_URL}/intel/daily-run${force ? '?force=true' : ''}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'X-OpenCTI-Url': openctiUrl,
+            'X-OpenCTI-Token': openctiKey,
+          },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.report && data.report.source !== 'no_data' && data.report.ioc_count > 0) {
+            const report = { ...data.report, generated_at: data.report.generated_at || new Date().toISOString() };
+            localStorage.setItem(STORAGE_KEYS.DAILY_REPORT, JSON.stringify(report));
+            localStorage.setItem(STORAGE_KEYS.LAST_DAILY_RUN, todayDateStr());
+            setDailyReport(report);
+            return report;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('[Daily Report] Backend unavailable, using local aggregation:', backendErr.message);
+      }
+
+      // Fallback: aggregate locally from current attacks
+      await new Promise(r => setTimeout(r, 800));
+      const report = buildDailyReport(currentAttacks);
+      localStorage.setItem(STORAGE_KEYS.DAILY_REPORT, JSON.stringify(report));
+      localStorage.setItem(STORAGE_KEYS.LAST_DAILY_RUN, todayDateStr());
+      setDailyReport(report);
+      return report;
+    } catch (err) {
+      console.error('[Daily Report] Failed:', err);
+    } finally {
+      setIsDailyGenerating(false);
+    }
+  }, []);
+
+  // ── Manual daily report trigger ────────────────────────────────────────────
+  const triggerDailyReport = useCallback(async () => {
+    const current = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTACKS) || '[]');
+    await generateDailyReport(current, true);
+  }, [generateDailyReport]);
+
+  // ── Generate a new live AI attack (manual button) ─────────────────────────
+  const generateLiveAttack = useCallback(async (rawText, client) => {
     const apiKey = localStorage.getItem('ai_gemini_key');
     if (!apiKey) throw new Error('Please configure your Gemini API Key in AI Settings first.');
-    
+
     setIsGenerating(true);
     try {
-      const newAttack = await generateThreatIntel(apiKey, rawText);
+      const newAttack = await generateThreatIntel(apiKey, rawText, [], client);
+      const newAttackWithDate = {
+        ...newAttack,
+        generated_at: new Date().toISOString()
+      };
       setAttacks(prev => {
-        const existingIndex = prev.findIndex(a => a.name === newAttack.name);
-        let newAttacks;
+        const existingIndex = prev.findIndex(a => a.name === newAttackWithDate.name);
+        let next;
         if (existingIndex >= 0) {
-          newAttacks = [...prev];
-          newAttacks[existingIndex] = newAttack;
+          next = [...prev];
+          next[existingIndex] = newAttackWithDate;
         } else {
-          newAttacks = [newAttack, ...prev];
+          next = [newAttackWithDate, ...prev];
         }
-        localStorage.setItem('thboard_live_attacks', JSON.stringify(newAttacks));
-        return newAttacks;
+        localStorage.setItem(STORAGE_KEYS.ATTACKS, JSON.stringify(next));
+        return next;
       });
-      setLastUpdated(new Date().toLocaleTimeString());
-      return newAttack;
+      setLastUpdated(new Date().toLocaleTimeString() + ' (Live AI)');
+      return newAttackWithDate;
     } catch (err) {
       console.error(err);
       throw err;
@@ -59,420 +305,143 @@ export const useAIHub = () => {
     }
   }, []);
 
+  // ── Fetch real attacks from backend (OpenCTI → Gemini pipeline) ──────────
   const fetchRecentAttacks = useCallback(async () => {
+    if (feedFetchInFlightRef.current) return;
+    feedFetchInFlightRef.current = true;
     setIsFetching(true);
-    
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const dummyAttacks = [
-        {
-          id: 'atk-001',
-          name: 'Volt Typhoon: Living off the Land (LotL) targeting Critical Infrastructure',
-          date: '2026-05-24',
-          metadata: {
-            actor: 'Volt Typhoon',
-            aliases: 'Bronze Silhouette, DEV-0391, VANGUARD PANDA',
-            origin: 'China (PRC sponsored)',
-            activeSince: '2021 (confirmed 2023)',
-            targetSector: 'Critical Infrastructure (Energy/Water/Comms/OT)',
-            dwellTime: '300+ days average',
-            sophistication: 'Nation State',
-            cisaAlert: 'AA23-144A (May 2023)',
-            confidence: 'HIGH 94%'
-          },
-          poc: {
-            hypothesis: `Volt Typhoon maintains persistent access to US critical infrastructure using a UNIQUE behavioral pattern:
+      // Try the real backend /intel/feed endpoint
+      const openctiUrl = localStorage.getItem('ai_opencti_url') || '';
+      const openctiKey = localStorage.getItem('ai_opencti_key') || '';
 
-PHASE 1 — Initial Access (Specific):
-Exploits Fortinet FortiGuard SSL VPN vulnerability CVE-2022-40684 OR Zoho ManageEngine ADSelfService Plus CVE-2021-40539 for initial foothold. NOT phishing. NOT email. Always edge device exploitation.
-
-PHASE 2 — Discovery (Specific):
-Runs THIS EXACT sequence of commands:
-net group /domain
-net user /domain  
-netstat -ano
-ipconfig /all
-systeminfo
-wmic computersystem get
-Uses cmd.exe NOT PowerShell (unique!)
-
-PHASE 3 — Credential Access (Specific):
-Uses ntdsutil.exe snapshot feature NOT vssadmin (other actors use vssadmin)
-Command specifically: ntdsutil 'ac i ntds' 'ifm' 'create full c:\\temp' q q
-This exact command = Volt Typhoon TTP
-
-PHASE 4 — C2 (Specific):
-Proxies ALL traffic through compromised SOHO routers. Specific brands targeted: Cisco RV320/RV325, Netgear ProSafe, Asus RT series, FatPipe WARP/IPVPN/MPVPN.
-Traffic has NO SNI headers = unique
-
-PHASE 5 — Persistence (Specific):
-Uses netsh portproxy commands:
-netsh interface portproxy add v4tov4 listenport=50100 connectaddress=[C2] connectport=443
-This specific portproxy config = Volt Typhoon signature behavior`,
-            logSources: [
-              { 
-                source: 'Sysmon EID 1', 
-                indicator: 'ntdsutil.exe with\n\'ifm\' argument\n(Volt Typhoon specific)', 
-                query: 'ProcessName=ntdsutil.exe\nCommandLine=*ifm*\nCommandLine=*create full*' 
-              },
-              { 
-                source: 'Sysmon EID 1', 
-                indicator: 'netsh portproxy\nadd v4tov4 command\n(Their C2 tunnel)', 
-                query: 'ProcessName=netsh.exe\nCommandLine=*portproxy*\nCommandLine=*v4tov4*' 
-              },
-              { 
-                source: 'Sysmon EID 3', 
-                indicator: 'Outbound to SOHO\nrouter IP ranges\nwithout SNI', 
-                query: 'dest_ip IN [SOHO ranges]\nNOT tls.server_name=*\ndest_port=443' 
-              },
-              { 
-                source: 'Windows EID\n4688', 
-                indicator: 'net commands in\nspecific sequence\nwithin 5 min window', 
-                query: 'EventCode=4688\nsequence detection\nwithin 300 seconds' 
-              },
-              { 
-                source: 'Fortinet Logs', 
-                indicator: 'CVE-2022-40684\nauth bypass attempt\non SSL VPN', 
-                query: 'action=ssl-vpn-login\nanomaly=true\nuri=*/api/v2/*' 
-              },
-              { 
-                source: 'NTDS/AD Logs', 
-                indicator: 'ntdsutil snapshot\nVSS shadow access\nto NTDS.dit', 
-                query: 'EventCode=4769\nServiceName=ntds*' 
-              }
-            ],
-            huntingSteps: [
-              { step: 'Identify IFM shadow copy extraction', description: 'Look for ntdsutil.exe executing the "ifm create full" command which dumps the AD database.' },
-              { step: 'Search for unauthorized port proxies', description: 'Hunt for netsh.exe configuring v4tov4 port proxies to bypass internal network segmentation.' },
-              { step: 'Analyze network telemetry for SOHO C2 proxying', description: 'Look for outbound TLS connections to residential IP space that lack standard Server Name Indication (SNI) headers.' },
-              { step: 'Correlate with initial access vectors', description: 'Check perimeter logs for exploitation of Fortinet CVE-2022-40684 around the time of the initial LotL activity.' }
-            ],
-            triageQuery: `| Comment: VOLT TYPHOON HUNTER v2.0
-| Comment: Detects specific LotL sequence
-| Comment: ntdsutil + netsh + net commands
-
-index=windows sourcetype=sysmon
-earliest=-7d
-(
-  (EventCode=1 
-   ProcessName="*\\\\ntdsutil.exe"
-   CommandLine="*ifm*" 
-   CommandLine="*create full*")
-  OR
-  (EventCode=1
-   ProcessName="*\\\\netsh.exe"
-   CommandLine="*portproxy*"
-   CommandLine="*v4tov4*")
-  OR
-  (EventCode=1
-   ProcessName IN (
-     "*\\\\net.exe",
-     "*\\\\net1.exe")
-   CommandLine IN (
-     "*group /domain*",
-     "*user /domain*"))
-)
-
-| eval technique=case(
-    ProcessName="*ntdsutil*","T1003.003-NTDS",
-    ProcessName="*netsh*" AND 
-    CommandLine="*portproxy*","T1090.001-Proxy",
-    ProcessName="*net*" AND 
-    CommandLine="*/domain*","T1069-Discovery",
-    true(),"Unknown")
-
-| eval severity=case(
-    technique="T1003.003-NTDS","CRITICAL",
-    technique="T1090.001-Proxy","HIGH",
-    true(),"MEDIUM")
-
-| eval volt_typhoon_confidence=case(
-    ProcessName="*ntdsutil*" AND
-    CommandLine="*ifm*","95%",
-    ProcessName="*netsh*" AND
-    CommandLine="*portproxy*","87%",
-    true(),"60%")
-
-| stats 
-    count as event_count,
-    values(technique) as techniques,
-    values(CommandLine) as commands,
-    dc(host) as affected_hosts,
-    max(severity) as max_severity,
-    first(volt_typhoon_confidence) 
-      as vt_confidence
-    by host, user, ParentProcessName
-
-| where event_count > 0
-
-| eval risk_score=case(
-    max_severity="CRITICAL" AND 
-    event_count > 3, 100,
-    max_severity="HIGH", 75,
-    true(), 50)
-
-| sort -risk_score
-
-| table 
-    host, user, 
-    affected_hosts,
-    techniques,
-    commands,
-    event_count,
-    max_severity,
-    vt_confidence,
-    risk_score
-
-| rename 
-    host as "Affected Host",
-    user as "User Account",
-    techniques as "MITRE Techniques",
-    max_severity as "Severity",
-    vt_confidence as "VT Confidence %",
-    risk_score as "Risk Score"`,
-            falsePositives: 'ntdsutil ifm = almost never FP (highly suspicious if run outside of standard backup scripts/servers). netsh portproxy = verify against IT tickets (sometimes used for legacy app routing). Net commands = verify against ITSM (domain admins performing normal enumeration).'
-          },
-          references: ['https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-038a', 'https://www.microsoft.com/en-us/security/blog/2023/05/24/volt-typhoon/'],
-          iocs: [
-            { type: 'IP', value: '192.168.1.5', context: 'Known compromised SOHO router used as proxy' },
-            { type: 'Command', value: 'netsh interface portproxy add v4tov4', context: 'LotL execution method' }
-          ],
-          hypotheses: [
-            {
-              hypoName: 'Detect ntdsutil.exe AD Extraction',
-              description: 'Volt Typhoon extracts NTDS.dit using ntdsutil.exe. This is rarely used by legitimate admins outside of Domain Controllers and scheduled backup tasks.',
-              mitreId: 'T1003.003',
-              tactic: 'Credential Access (TA0006)',
-              platform: 'Windows',
-              dataSource: 'Process Creation',
-              actorContext: 'This technique is used in Phase 3 of Volt Typhoon attack chain. SPECIFICALLY they use ntdsutil.exe NOT vssadmin (other actors use this). If you find ntdsutil with ifm args = HIGH CONFIDENCE Volt Typhoon.',
-              confidence: 'HIGH 94%',
-              source: 'CISA AA23-144A + NSA Advisory',
-              lastSeen: 'Active as of May 2026',
-              huntingLogic: '1. Run query in last 90 days\n2. Focus on non-IT user accounts\n3. Check ParentProcess (should NOT be backup software)\n4. Correlate with VPN auth logs ±48 hours of this event\n5. If found → CRITICAL escalation',
-              falsePositiveRisk: 'LOW: ntdsutil ifm is rarely used legitimately. If seen = investigate.',
-              truePositiveAction: '🚨 Escalate to IR immediately\n🚨 Assume full AD compromise\n🚨 Reset ALL domain admin passwords',
-              splunkSPL: 'index=windows sourcetype="WinEventLog:Security" EventCode=4688 ProcessName="*\\\\ntdsutil.exe" CommandLine="*ifm create full*"'
-            },
-            {
-              hypoName: 'Detect netsh.exe PortProxy Configuration',
-              description: 'Attackers use netsh.exe to configure port proxies (v4tov4) to pivot through internal network segments.',
-              mitreId: 'T1090',
-              tactic: 'Command and Control',
-              huntingLogic: 'Look for process creation events for netsh.exe with command line arguments containing "interface portproxy add v4tov4".',
-              splunkSPL: 'index=windows (sourcetype="WinEventLog:Security" EventCode=4688 OR sourcetype="XmlWinEventLog:Microsoft-Windows-Sysmon/Operational" EventCode=1) ProcessName="*\\\\netsh.exe" CommandLine="*interface portproxy add v4tov4*"'
-            },
-            {
-              hypoName: 'Detect Anomalous Network Discovery via net.exe',
-              description: 'Volt Typhoon uses native net.exe commands in rapid succession to map users, groups, and network shares.',
-              mitreId: 'T1087.002',
-              tactic: 'Discovery',
-              huntingLogic: 'Identify instances of net.exe or net1.exe executing commands like "user", "group", or "use" rapidly from a single host.',
-              splunkSPL: 'index=windows sourcetype="WinEventLog:Security" EventCode=4688 (ProcessName="*\\\\net.exe" OR ProcessName="*\\\\net1.exe") | stats count by host, user, _time | where count > 5'
-            },
-            {
-              hypoName: 'Detect Outbound TLS Without SNI',
-              description: 'C2 traffic proxied through SOHO routers often lacks the Server Name Indication (SNI) header in the TLS handshake.',
-              mitreId: 'T1071.001',
-              tactic: 'Command and Control',
-              huntingLogic: 'Query Zeek, Suricata, or advanced firewall logs for outbound port 443 traffic where the SNI field is empty or malformed.',
-              splunkSPL: 'index=network sourcetype="zeek_ssl" dest_port=443 server_name="-" OR server_name="" | stats count by src_ip, dest_ip'
-            }
-          ]
+      const res = await fetch(`${API_BASE_URL}/intel/feed`, {
+        headers: {
+          'X-OpenCTI-Url': openctiUrl,
+          'X-OpenCTI-Token': openctiKey,
         },
-        {
-          id: 'atk-002',
-          name: 'Ivanti Connect Secure Zero-Day (CVE-2023-46805 & CVE-2024-21887)',
-          date: '2026-05-25',
-          metadata: {
-            actor: 'UNC5221 (Suspected)',
-            aliases: 'Unknown / Emerging',
-            origin: 'Unknown (Suspected PRC nexus)',
-            activeSince: 'December 2023',
-            targetSector: 'Government, Defense, Aerospace, Tech',
-            dwellTime: 'Rapid exploitation & persistence',
-            sophistication: 'Advanced / Zero-Day capability',
-            cisaAlert: 'ED 24-01 (Jan 2024)',
-            confidence: 'HIGH 90%'
-          },
-          poc: {
-            hypothesis: `Ivanti Connect Secure Zero-Day (CVE-2023-46805 & CVE-2024-21887) exploitation follows a HIGHLY SPECIFIC sequence targeting unpatched edge appliances:
-
-PHASE 1 — Initial Access (Specific):
-Exploits CVE-2023-46805 (Authentication Bypass via Path Traversal).
-The attacker sends a specific URI path traversal request:
-GET /api/v1/totp/user-backup/../../system/system-information
-This exact string bypasses the authentication filter on the REST API.
-
-PHASE 2 — Execution (Specific):
-Chains with CVE-2024-21887 (Command Injection).
-The attacker injects a python or bash payload into the vulnerable \`license/keys-status/\` endpoint.
-Uses the internal Node.js web service to spawn the payload:
-node.js spawns python -c "import pty;pty.spawn('/bin/bash')"
-
-PHASE 3 — Persistence (Specific):
-Drops customized web shells (e.g. GLASSTOKEN or GIFTEDVISITOR).
-Specifically written to: /api/v1/cav/client/status OR modifies internal perl files like /home/perl/DSUpgrade.pm.
-This survives standard reboots and partial system upgrades.
-
-PHASE 4 — C2 & Post-Exploitation (Specific):
-The compromised VPN appliance initiates anomalous OUTBOUND traffic over port 80/443 to download secondary payloads.
-Typically uses internal curl or wget binaries to pull rust-based payloads from attacker infrastructure.`,
-            logSources: [
-              { 
-                source: 'Web Server\nAccess Logs', 
-                indicator: 'URI Path Traversal\ntargeting TOTP\nand License APIs', 
-                query: 'status=200\nuri_path=*/api/v1/totp/user-backup*\nuri_path=*keys-status*' 
-              },
-              { 
-                source: 'Sysmon EID 1\n(Process Creation)', 
-                indicator: 'Node.js spawning\nPython, bash, or\ncurl processes', 
-                query: 'ParentProcess=node\nProcessName IN (python, bash, curl, wget)' 
-              },
-              { 
-                source: 'File Integrity\nMonitoring (FIM)', 
-                indicator: 'Webshell dropped\nin appliance\nwebroot', 
-                query: 'action="created"\nfile_path="*/api/v1/cav/client/status"\nOR file_path="*/home/perl/DSUpgrade.pm"' 
-              }
-            ],
-            huntingSteps: [
-              { step: 'Search for authentication bypass attempts', description: 'Look for HTTP GET/POST requests containing path traversal sequences (e.g., /../) directed at the /api/v1/totp/user-backup endpoint.' },
-              { step: 'Identify execution of command injection payload', description: 'Hunt for Node.js or internal web processes spawning unexpected interactive shells, network utilities (curl/wget), or python socket scripts.' },
-              { step: 'Analyze FIM for webshell persistence', description: 'Check appliance filesystem alerts for newly created or modified files specifically targeting /api/v1/cav/client/status or patched perl files like /home/perl/DSUpgrade.pm.' },
-              { step: 'Correlate with anomalous VPN connections', description: 'Review VPN gateway logs for unauthorized administrative configuration changes immediately following the suspicious web requests.' }
-            ],
-            triageQuery: `| Comment: IVANTI ZERO-DAY HUNTER v2.0
-| Comment: Detects CVE-2023-46805 & CVE-2024-21887
-| Comment: Path traversal + webshell drops
-
-index=* (sourcetype="access_combined" OR sourcetype="sysmon" OR sourcetype="fim")
-earliest=-7d
-(
-  (uri_path="*/api/v1/totp/user-backup*" OR uri_path="*keys-status*")
-  OR
-  (EventCode=1 ParentProcess="node" ProcessName IN ("python", "bash", "curl", "wget"))
-  OR
-  (action="created" (file_path="*/api/v1/cav/client/status" OR file_path="*/home/perl/DSUpgrade.pm"))
-)
-
-| eval technique=case(
-    uri_path="*/api/v1/totp/user-backup*","T1190-Exploit_Public_App",
-    ParentProcess="node","T1059.004-Unix_Shell",
-    action="created","T1505.003-Web_Shell",
-    true(),"Unknown")
-
-| eval severity=case(
-    technique="T1505.003-Web_Shell","CRITICAL",
-    technique="T1059.004-Unix_Shell","HIGH",
-    true(),"MEDIUM")
-
-| eval ivanti_confidence=case(
-    file_path="*/api/v1/cav/client/status","99%",
-    uri_path="*/api/v1/totp/user-backup*","85%",
-    true(),"65%")
-
-| stats 
-    count as event_count,
-    values(technique) as techniques,
-    values(uri_path) as uris,
-    values(file_path) as dropped_files,
-    max(severity) as max_severity,
-    first(ivanti_confidence) as ivanti_confidence
-    by host, src_ip
-
-| where event_count > 0
-
-| eval risk_score=case(
-    max_severity="CRITICAL", 100,
-    max_severity="HIGH" AND event_count > 2, 85,
-    true(), 50)
-
-| sort -risk_score
-
-| table 
-    host, src_ip, 
-    techniques,
-    uris,
-    dropped_files,
-    event_count,
-    max_severity,
-    ivanti_confidence,
-    risk_score
-
-| rename 
-    host as "Affected VPN Appliance",
-    src_ip as "Attacker IP",
-    techniques as "MITRE Techniques",
-    max_severity as "Severity",
-    ivanti_confidence as "Ivanti Confidence %",
-    risk_score as "Risk Score"`,
-            falsePositives: 'Authorized Ivanti system updates, patch installations, or administrative diagnostic scripts initiated by authorized network administrators. Internal vulnerability scanners may also generate path traversal signatures. Legitimate perl upgrades applied by Ivanti patch management.'
-          },
-          references: ['https://forums.ivanti.com/s/article/Security-Update'],
-          iocs: [
-            { type: 'Hash', value: '3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b', context: 'Web shell payload (GLASSTOKEN)' },
-            { type: 'Domain', value: 'api.threat-actor-c2.net', context: 'C2 beaconing domain' }
-          ],
-          hypotheses: [
-            {
-              hypoName: 'Detect Node.js Spawning Suspicious Shells',
-              description: 'The Ivanti command injection payload causes the internal Node.js service to spawn bash or python scripts for reverse shells.',
-              mitreId: 'T1059.004',
-              tactic: 'Execution',
-              huntingLogic: 'Query EDR or process logs for node or httpd processes acting as the parent process to shell interpreters or download utilities.',
-              splunkSPL: 'index=edr (parent_process="node" OR parent_process="httpd") process_name IN ("bash", "sh", "python", "curl", "wget")'
-            },
-            {
-              hypoName: 'Detect Malicious Web Shell File Creation',
-              description: 'Look for new files created or modified in specific known web shell paths used in the Ivanti zero-day exploit chain.',
-              mitreId: 'T1505.003',
-              tactic: 'Persistence',
-              huntingLogic: 'Utilize FIM logs to monitor the appliance directory structure for file creation events matching known actor web shell drop locations.',
-              splunkSPL: 'index=fim action="created" (file_path="*/api/v1/cav/client/status*" OR file_path="*/home/perl/DSUpgrade.pm*")'
-            },
-            {
-              hypoName: 'Detect ICS TOTP Path Traversal',
-              description: 'Identify the CVE-2023-46805 authentication bypass via path traversal targeting the TOTP and License backup APIs.',
-              mitreId: 'T1190',
-              tactic: 'Initial Access',
-              huntingLogic: 'Scan web server access logs for URI paths containing the specific traversal sequences paired with the vulnerable endpoints.',
-              splunkSPL: 'index=web sourcetype="access_combined" uri_path="*/api/v1/totp/user-backup*" (uri_path="*/../*" OR uri_path="*keys-status*") status=200'
-            },
-            {
-              hypoName: 'Detect Unusual Outbound Connectivity from Appliance',
-              description: 'Post-exploitation, the compromised VPN appliance initiates outbound network connections to attacker infrastructure to download secondary payloads.',
-              mitreId: 'T1105',
-              tactic: 'Command and Control',
-              huntingLogic: 'Analyze firewall logs for unexpected outbound traffic from the VPN appliance IP to non-standard, external IP addresses over HTTP/HTTPS.',
-              splunkSPL: 'index=firewall src_ip="<VPN_APPLIANCE_IP>" dest_ip!="<INTERNAL_SUBNETS>" (dest_port=80 OR dest_port=443) NOT dest_ip IN (<KNOWN_IVANTI_UPDATE_SERVERS>)'
-            }
-          ]
-        }
-      ];
-
-      setAttacks(prev => {
-        // Only add dummy attacks if they don't already exist to avoid cluttering local storage
-        const newAttacks = [...prev];
-        dummyAttacks.forEach(dummy => {
-          if (!newAttacks.some(a => a.id === dummy.id)) {
-            newAttacks.push(dummy);
-          }
-        });
-        localStorage.setItem('thboard_live_attacks', JSON.stringify(newAttacks));
-        return newAttacks;
+        signal: AbortSignal.timeout(30000), // 30s — Gemini analysis takes time
       });
-      setLastUpdated(new Date().toLocaleTimeString());
+
+      if (res.ok) {
+        const data = await res.json();
+        const liveCampaigns = data.campaigns || [];
+
+        if (liveCampaigns.length > 0) {
+          const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTACKS) || '[]');
+          const stamped = liveCampaigns.map(c => {
+            const existing = cached.find(a => a.name === c.name || a.id === c.id);
+            return {
+              ...c,
+              date: c.date || new Date().toISOString().split('T')[0],
+              generated_at: existing?.generated_at || c.generated_at || data.generated_at || new Date().toISOString()
+            };
+          });
+          localStorage.setItem(STORAGE_KEYS.ATTACKS, JSON.stringify(stamped));
+          setAttacks(stamped);
+          setLastUpdated(new Date().toLocaleTimeString() + ' (Live — OpenCTI + AI)');
+          console.log(`[Intel Feed] Loaded ${liveCampaigns.length} live campaigns from OpenCTI`);
+          return;
+        }
+      }
+
+      // Backend returned empty or failed — use cache
+      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTACKS) || '[]');
+      if (cached.length > 0) {
+        setAttacks(cached);
+        setLastUpdated(new Date().toLocaleTimeString() + ' (Cached)');
+        console.log(`[Intel Feed] Using ${cached.length} cached campaigns`);
+        return;
+      }
+
+      // Final fallback: show seed campaign so the page is not blank
+      console.warn('[Intel Feed] No live or cached data — loading seed campaign');
+      const seeds = [SEED_CAMPAIGN];
+      localStorage.setItem(STORAGE_KEYS.ATTACKS, JSON.stringify(seeds));
+      setAttacks(seeds);
+      setLastUpdated(new Date().toLocaleTimeString() + ' (Sample — connect OpenCTI for live data)');
     } catch (err) {
-      console.error(err);
+      console.error('[Intel Feed] Fetch failed:', err.message);
+      // Show cached data on error rather than blank page
+      const cached = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTACKS) || '[]');
+      if (cached.length > 0) {
+        setAttacks(cached);
+        setLastUpdated(new Date().toLocaleTimeString() + ' (Cached — backend offline)');
+      } else {
+        const seeds = [SEED_CAMPAIGN];
+        setAttacks(seeds);
+        setLastUpdated(new Date().toLocaleTimeString() + ' (Sample)');
+      }
     } finally {
+      feedFetchInFlightRef.current = false;
       setIsFetching(false);
     }
   }, []);
 
+  // Keep the proactive feed live while the page is open.
   useEffect(() => {
-    fetchRecentAttacks();
+    const liveRefreshTimer = setInterval(() => {
+      fetchRecentAttacks();
+    }, LIVE_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(liveRefreshTimer);
   }, [fetchRecentAttacks]);
+
+  // ── Midnight scheduler ────────────────────────────────────────────────────
+  useEffect(() => {
+    const scheduleNextMidnight = () => {
+      if (midnightTimerRef.current) clearTimeout(midnightTimerRef.current);
+
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0);
+      const msUntilMidnight = tomorrow.getTime() - now.getTime();
+
+      console.log(`[Daily Intel] Next report scheduled in ${Math.round(msUntilMidnight / 1000 / 60)} minutes.`);
+
+      midnightTimerRef.current = setTimeout(async () => {
+        console.log('[Daily Intel] Running midnight daily intel report...');
+        // 1. Refresh the feed from OpenCTI first
+        await fetchRecentAttacks();
+        // 2. Then generate the daily report from the refreshed data
+        const current = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTACKS) || '[]');
+        await generateDailyReport(current, false);
+        // Re-schedule for the next midnight
+        scheduleNextMidnight();
+      }, msUntilMidnight);
+    };
+
+    scheduleNextMidnight();
+
+    return () => {
+      if (midnightTimerRef.current) clearTimeout(midnightTimerRef.current);
+    };
+  }, [generateDailyReport, fetchRecentAttacks]);
+
+  // ── Initial load ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const init = async () => {
+      await fetchRecentAttacks();
+      // Check if daily report already ran today
+      const lastRun = localStorage.getItem(STORAGE_KEYS.LAST_DAILY_RUN);
+      if (lastRun !== todayDateStr()) {
+        console.log('[Daily Intel] Report not run today yet. Fetching/generating...');
+        // Clear stale local daily report immediately
+        localStorage.removeItem(STORAGE_KEYS.DAILY_REPORT);
+        setDailyReport(null);
+
+        // Try fetching cached report from backend first
+        const fetched = await fetchDailyReport();
+        if (!fetched) {
+          // If not available, generate it
+          const current = JSON.parse(localStorage.getItem(STORAGE_KEYS.ATTACKS) || '[]');
+          await generateDailyReport(current, false);
+        }
+      }
+    };
+    init();
+  }, [fetchRecentAttacks, fetchDailyReport, generateDailyReport]);
 
   return {
     attacks,
@@ -482,6 +451,10 @@ earliest=-7d
     fetchRecentAttacks,
     generateLiveAttack,
     savedLibrary,
-    saveHypothesis
+    saveHypothesis,
+    dailyReport,
+    isDailyGenerating,
+    triggerDailyReport,
+    fetchDailyReport,
   };
 };

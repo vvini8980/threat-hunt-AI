@@ -1,0 +1,458 @@
+{
+  "date": "2026-06-08",
+  "generated_at": "2026-06-09T14:58:29.198216",
+  "report_for": "2026-06-08",
+  "ioc_count": 5,
+  "actor_count": 5,
+  "attack_count": 5,
+  "type_breakdown": {
+    "ip": 2,
+    "domain": 2,
+    "hash": 1
+  },
+  "top_iocs": [
+    {
+      "type": "ip",
+      "value": "141.86.64.183",
+      "confidence": "High",
+      "threat_actor": "VOLT TYPHOON"
+    },
+    {
+      "type": "domain",
+      "value": "update-671.microsoft-sys-auth.com",
+      "confidence": "High",
+      "threat_actor": "APT29"
+    },
+    {
+      "type": "domain",
+      "value": "evil-cve-2024.com",
+      "confidence": "High",
+      "threat_actor": "UNC5221"
+    },
+    {
+      "type": "hash",
+      "value": "7756e8df3e8e7c10b7b12c4b82d3345d3",
+      "confidence": "Medium",
+      "threat_actor": "LOCKBIT 3.0"
+    },
+    {
+      "type": "ip",
+      "value": "212.232.193.47",
+      "confidence": "Medium",
+      "threat_actor": "SCATTERED SPIDER"
+    }
+  ],
+  "actors": [
+    "VOLT TYPHOON",
+    "APT29",
+    "LOCKBIT 3.0",
+    "UNC5221",
+    "SCATTERED SPIDER"
+  ],
+  "campaigns": [
+    {
+      "id": "atk-volt-typhoon-2026-06-09",
+      "name": "VOLT TYPHOON: Active Campaign (OpenCTI Feed — 2026-06-09)",
+      "date": "2026-06-08",
+      "metadata": {
+        "actor": "VOLT TYPHOON",
+        "aliases": "See OpenCTI",
+        "origin": "Unknown",
+        "activeSince": "Current",
+        "targetSector": "Multiple Sectors",
+        "dwellTime": "Unknown",
+        "sophistication": "Unknown",
+        "cisaAlert": "N/A",
+        "confidence": "High (from OpenCTI)"
+      },
+      "poc": {
+        "hypothesis": "VOLT TYPHOON has active IOCs in your threat intel feed. Review the IOC list below and hunt for any matches in your SIEM.",
+        "triageQuery": "| Comment: Hunt for VOLT TYPHOON IOCs\nindex=* earliest=-7d\n  141.86.64.183",
+        "falsePositives": "Review each IOC against your allowlist before escalating.",
+        "huntingSteps": [
+          {
+            "step": "Review IOCs in Splunk/Sentinel",
+            "description": "Search for all 1 IOC values from VOLT TYPHOON in your SIEM."
+          },
+          {
+            "step": "Correlate with user/host activity",
+            "description": "For any matching IOC, identify which hosts and users interacted with it."
+          },
+          {
+            "step": "Enrich with threat context",
+            "description": "Use OpenCTI to get full context on any matched IOC before escalating."
+          }
+        ],
+        "logSources": [
+          {
+            "source": "Firewall / Proxy",
+            "indicator": "Outbound connections to IOC IPs/Domains",
+            "query": "index=network dest_ip IN [ioc_list]"
+          },
+          {
+            "source": "DNS Logs",
+            "indicator": "DNS queries to malicious domains",
+            "query": "index=dns query IN [domain_ioc_list]"
+          },
+          {
+            "source": "EDR / Sysmon",
+            "indicator": "File hash matches from endpoint telemetry",
+            "query": "index=edr file_hash IN [hash_ioc_list]"
+          }
+        ]
+      },
+      "references": [],
+      "iocs": [
+        {
+          "type": "IP",
+          "value": "141.86.64.183",
+          "context": "Observed C2 infrastructure targeting critical infrastructure."
+        }
+      ],
+      "hypotheses": [
+        {
+          "hypoName": "Hunt VOLT TYPHOON IOC Activity",
+          "description": "Search for any signs of VOLT TYPHOON infrastructure contact across your environment based on 1 IOCs from OpenCTI.",
+          "mitreId": "T1071.001",
+          "tactic": "Command and Control",
+          "platform": "Cross-Platform",
+          "dataSource": "Network Telemetry / Firewall / DNS / Proxy",
+          "actorContext": "These IOCs were ingested live from OpenCTI and attributed to VOLT TYPHOON.",
+          "confidence": "High",
+          "source": "OpenCTI Live Feed",
+          "lastSeen": "2026-06-09",
+          "huntingLogic": "1. Load all 1 IOC values\n2. Search firewall logs for outbound connections\n3. Search DNS logs for domain queries\n4. Search EDR for hash matches\n5. Correlate hits with user/host identity",
+          "falsePositiveRisk": "LOW to MEDIUM — validate against known-good lists",
+          "truePositiveAction": "🚨 Block all VOLT TYPHOON IOCs on perimeter\n🚨 Isolate any matching hosts\n🚨 Escalate to Incident Response",
+          "splunkSPL": "index=* earliest=-30d\n(\n  \"141.86.64.183\"\n)\n| stats count by host, src_ip, dest_ip\n| sort -count",
+          "sentinelKQL": "let iocs = dynamic([\"141.86.64.183\"]);\nCommonSecurityLog\n| where TimeGenerated > ago(30d)\n| where DestinationIP in (iocs) or DestinationHostName in (iocs)\n| summarize count() by SourceIP, DestinationIP, TimeGenerated\n| order by count_ desc"
+        }
+      ],
+      "generated_at": "2026-06-09T14:58:23.750843Z"
+    },
+    {
+      "id": "atk-apt29-2026-06-09",
+      "name": "APT29: Active Campaign (OpenCTI Feed — 2026-06-09)",
+      "date": "2026-06-08",
+      "metadata": {
+        "actor": "APT29",
+        "aliases": "See OpenCTI",
+        "origin": "Unknown",
+        "activeSince": "Current",
+        "targetSector": "Multiple Sectors",
+        "dwellTime": "Unknown",
+        "sophistication": "Unknown",
+        "cisaAlert": "N/A",
+        "confidence": "High (from OpenCTI)"
+      },
+      "poc": {
+        "hypothesis": "APT29 has active IOCs in your threat intel feed. Review the IOC list below and hunt for any matches in your SIEM.",
+        "triageQuery": "| Comment: Hunt for APT29 IOCs\nindex=* earliest=-7d\n  update-671.microsoft-sys-auth.com",
+        "falsePositives": "Review each IOC against your allowlist before escalating.",
+        "huntingSteps": [
+          {
+            "step": "Review IOCs in Splunk/Sentinel",
+            "description": "Search for all 1 IOC values from APT29 in your SIEM."
+          },
+          {
+            "step": "Correlate with user/host activity",
+            "description": "For any matching IOC, identify which hosts and users interacted with it."
+          },
+          {
+            "step": "Enrich with threat context",
+            "description": "Use OpenCTI to get full context on any matched IOC before escalating."
+          }
+        ],
+        "logSources": [
+          {
+            "source": "Firewall / Proxy",
+            "indicator": "Outbound connections to IOC IPs/Domains",
+            "query": "index=network dest_ip IN [ioc_list]"
+          },
+          {
+            "source": "DNS Logs",
+            "indicator": "DNS queries to malicious domains",
+            "query": "index=dns query IN [domain_ioc_list]"
+          },
+          {
+            "source": "EDR / Sysmon",
+            "indicator": "File hash matches from endpoint telemetry",
+            "query": "index=edr file_hash IN [hash_ioc_list]"
+          }
+        ]
+      },
+      "references": [],
+      "iocs": [
+        {
+          "type": "DOMAIN",
+          "value": "update-671.microsoft-sys-auth.com",
+          "context": "Spear-phishing domain masquerading as Microsoft Auth."
+        }
+      ],
+      "hypotheses": [
+        {
+          "hypoName": "Hunt APT29 IOC Activity",
+          "description": "Search for any signs of APT29 infrastructure contact across your environment based on 1 IOCs from OpenCTI.",
+          "mitreId": "T1071.001",
+          "tactic": "Command and Control",
+          "platform": "Cross-Platform",
+          "dataSource": "Network Telemetry / Firewall / DNS / Proxy",
+          "actorContext": "These IOCs were ingested live from OpenCTI and attributed to APT29.",
+          "confidence": "High",
+          "source": "OpenCTI Live Feed",
+          "lastSeen": "2026-06-09",
+          "huntingLogic": "1. Load all 1 IOC values\n2. Search firewall logs for outbound connections\n3. Search DNS logs for domain queries\n4. Search EDR for hash matches\n5. Correlate hits with user/host identity",
+          "falsePositiveRisk": "LOW to MEDIUM — validate against known-good lists",
+          "truePositiveAction": "🚨 Block all APT29 IOCs on perimeter\n🚨 Isolate any matching hosts\n🚨 Escalate to Incident Response",
+          "splunkSPL": "index=* earliest=-30d\n(\n  \"update-671.microsoft-sys-auth.com\"\n)\n| stats count by host, src_ip, dest_ip\n| sort -count",
+          "sentinelKQL": "let iocs = dynamic([\"update-671.microsoft-sys-auth.com\"]);\nCommonSecurityLog\n| where TimeGenerated > ago(30d)\n| where DestinationIP in (iocs) or DestinationHostName in (iocs)\n| summarize count() by SourceIP, DestinationIP, TimeGenerated\n| order by count_ desc"
+        }
+      ],
+      "generated_at": "2026-06-09T14:58:24.857407Z"
+    },
+    {
+      "id": "atk-lockbit-3.0-2026-06-09",
+      "name": "LOCKBIT 3.0: Active Campaign (OpenCTI Feed — 2026-06-09)",
+      "date": "2026-06-08",
+      "metadata": {
+        "actor": "LOCKBIT 3.0",
+        "aliases": "See OpenCTI",
+        "origin": "Unknown",
+        "activeSince": "Current",
+        "targetSector": "Multiple Sectors",
+        "dwellTime": "Unknown",
+        "sophistication": "Unknown",
+        "cisaAlert": "N/A",
+        "confidence": "Medium (from OpenCTI)"
+      },
+      "poc": {
+        "hypothesis": "LOCKBIT 3.0 has active IOCs in your threat intel feed. Review the IOC list below and hunt for any matches in your SIEM.",
+        "triageQuery": "| Comment: Hunt for LOCKBIT 3.0 IOCs\nindex=* earliest=-7d\n  7756e8df3e8e7c10b7b12c4b82d3345d3",
+        "falsePositives": "Review each IOC against your allowlist before escalating.",
+        "huntingSteps": [
+          {
+            "step": "Review IOCs in Splunk/Sentinel",
+            "description": "Search for all 1 IOC values from LOCKBIT 3.0 in your SIEM."
+          },
+          {
+            "step": "Correlate with user/host activity",
+            "description": "For any matching IOC, identify which hosts and users interacted with it."
+          },
+          {
+            "step": "Enrich with threat context",
+            "description": "Use OpenCTI to get full context on any matched IOC before escalating."
+          }
+        ],
+        "logSources": [
+          {
+            "source": "Firewall / Proxy",
+            "indicator": "Outbound connections to IOC IPs/Domains",
+            "query": "index=network dest_ip IN [ioc_list]"
+          },
+          {
+            "source": "DNS Logs",
+            "indicator": "DNS queries to malicious domains",
+            "query": "index=dns query IN [domain_ioc_list]"
+          },
+          {
+            "source": "EDR / Sysmon",
+            "indicator": "File hash matches from endpoint telemetry",
+            "query": "index=edr file_hash IN [hash_ioc_list]"
+          }
+        ]
+      },
+      "references": [],
+      "iocs": [
+        {
+          "type": "HASH",
+          "value": "7756e8df3e8e7c10b7b12c4b82d3345d3",
+          "context": "Ransomware payload dropper seen in recent financial sector attacks."
+        }
+      ],
+      "hypotheses": [
+        {
+          "hypoName": "Hunt LOCKBIT 3.0 IOC Activity",
+          "description": "Search for any signs of LOCKBIT 3.0 infrastructure contact across your environment based on 1 IOCs from OpenCTI.",
+          "mitreId": "T1071.001",
+          "tactic": "Command and Control",
+          "platform": "Cross-Platform",
+          "dataSource": "Network Telemetry / Firewall / DNS / Proxy",
+          "actorContext": "These IOCs were ingested live from OpenCTI and attributed to LOCKBIT 3.0.",
+          "confidence": "Medium",
+          "source": "OpenCTI Live Feed",
+          "lastSeen": "2026-06-09",
+          "huntingLogic": "1. Load all 1 IOC values\n2. Search firewall logs for outbound connections\n3. Search DNS logs for domain queries\n4. Search EDR for hash matches\n5. Correlate hits with user/host identity",
+          "falsePositiveRisk": "LOW to MEDIUM — validate against known-good lists",
+          "truePositiveAction": "🚨 Block all LOCKBIT 3.0 IOCs on perimeter\n🚨 Isolate any matching hosts\n🚨 Escalate to Incident Response",
+          "splunkSPL": "index=* earliest=-30d\n(\n  \"7756e8df3e8e7c10b7b12c4b82d3345d3\"\n)\n| stats count by host, src_ip, dest_ip\n| sort -count",
+          "sentinelKQL": "let iocs = dynamic([\"7756e8df3e8e7c10b7b12c4b82d3345d3\"]);\nCommonSecurityLog\n| where TimeGenerated > ago(30d)\n| where DestinationIP in (iocs) or DestinationHostName in (iocs)\n| summarize count() by SourceIP, DestinationIP, TimeGenerated\n| order by count_ desc"
+        }
+      ],
+      "generated_at": "2026-06-09T14:58:25.969384Z"
+    },
+    {
+      "id": "atk-unc5221-2026-06-09",
+      "name": "UNC5221: Active Campaign (OpenCTI Feed — 2026-06-09)",
+      "date": "2026-06-08",
+      "metadata": {
+        "actor": "UNC5221",
+        "aliases": "See OpenCTI",
+        "origin": "Unknown",
+        "activeSince": "Current",
+        "targetSector": "Multiple Sectors",
+        "dwellTime": "Unknown",
+        "sophistication": "Unknown",
+        "cisaAlert": "N/A",
+        "confidence": "High (from OpenCTI)"
+      },
+      "poc": {
+        "hypothesis": "UNC5221 has active IOCs in your threat intel feed. Review the IOC list below and hunt for any matches in your SIEM.",
+        "triageQuery": "| Comment: Hunt for UNC5221 IOCs\nindex=* earliest=-7d\n  evil-cve-2024.com",
+        "falsePositives": "Review each IOC against your allowlist before escalating.",
+        "huntingSteps": [
+          {
+            "step": "Review IOCs in Splunk/Sentinel",
+            "description": "Search for all 1 IOC values from UNC5221 in your SIEM."
+          },
+          {
+            "step": "Correlate with user/host activity",
+            "description": "For any matching IOC, identify which hosts and users interacted with it."
+          },
+          {
+            "step": "Enrich with threat context",
+            "description": "Use OpenCTI to get full context on any matched IOC before escalating."
+          }
+        ],
+        "logSources": [
+          {
+            "source": "Firewall / Proxy",
+            "indicator": "Outbound connections to IOC IPs/Domains",
+            "query": "index=network dest_ip IN [ioc_list]"
+          },
+          {
+            "source": "DNS Logs",
+            "indicator": "DNS queries to malicious domains",
+            "query": "index=dns query IN [domain_ioc_list]"
+          },
+          {
+            "source": "EDR / Sysmon",
+            "indicator": "File hash matches from endpoint telemetry",
+            "query": "index=edr file_hash IN [hash_ioc_list]"
+          }
+        ]
+      },
+      "references": [],
+      "iocs": [
+        {
+          "type": "DOMAIN",
+          "value": "evil-cve-2024.com",
+          "context": "Ivanti Connect Secure SSRF vulnerability actively exploited."
+        }
+      ],
+      "hypotheses": [
+        {
+          "hypoName": "Hunt UNC5221 IOC Activity",
+          "description": "Search for any signs of UNC5221 infrastructure contact across your environment based on 1 IOCs from OpenCTI.",
+          "mitreId": "T1071.001",
+          "tactic": "Command and Control",
+          "platform": "Cross-Platform",
+          "dataSource": "Network Telemetry / Firewall / DNS / Proxy",
+          "actorContext": "These IOCs were ingested live from OpenCTI and attributed to UNC5221.",
+          "confidence": "High",
+          "source": "OpenCTI Live Feed",
+          "lastSeen": "2026-06-09",
+          "huntingLogic": "1. Load all 1 IOC values\n2. Search firewall logs for outbound connections\n3. Search DNS logs for domain queries\n4. Search EDR for hash matches\n5. Correlate hits with user/host identity",
+          "falsePositiveRisk": "LOW to MEDIUM — validate against known-good lists",
+          "truePositiveAction": "🚨 Block all UNC5221 IOCs on perimeter\n🚨 Isolate any matching hosts\n🚨 Escalate to Incident Response",
+          "splunkSPL": "index=* earliest=-30d\n(\n  \"evil-cve-2024.com\"\n)\n| stats count by host, src_ip, dest_ip\n| sort -count",
+          "sentinelKQL": "let iocs = dynamic([\"evil-cve-2024.com\"]);\nCommonSecurityLog\n| where TimeGenerated > ago(30d)\n| where DestinationIP in (iocs) or DestinationHostName in (iocs)\n| summarize count() by SourceIP, DestinationIP, TimeGenerated\n| order by count_ desc"
+        }
+      ],
+      "generated_at": "2026-06-09T14:58:27.081710Z"
+    },
+    {
+      "id": "atk-scattered-spider-2026-06-09",
+      "name": "SCATTERED SPIDER: Active Campaign (OpenCTI Feed — 2026-06-09)",
+      "date": "2026-06-08",
+      "metadata": {
+        "actor": "SCATTERED SPIDER",
+        "aliases": "See OpenCTI",
+        "origin": "Unknown",
+        "activeSince": "Current",
+        "targetSector": "Multiple Sectors",
+        "dwellTime": "Unknown",
+        "sophistication": "Unknown",
+        "cisaAlert": "N/A",
+        "confidence": "Medium (from OpenCTI)"
+      },
+      "poc": {
+        "hypothesis": "SCATTERED SPIDER has active IOCs in your threat intel feed. Review the IOC list below and hunt for any matches in your SIEM.",
+        "triageQuery": "| Comment: Hunt for SCATTERED SPIDER IOCs\nindex=* earliest=-7d\n  212.232.193.47",
+        "falsePositives": "Review each IOC against your allowlist before escalating.",
+        "huntingSteps": [
+          {
+            "step": "Review IOCs in Splunk/Sentinel",
+            "description": "Search for all 1 IOC values from SCATTERED SPIDER in your SIEM."
+          },
+          {
+            "step": "Correlate with user/host activity",
+            "description": "For any matching IOC, identify which hosts and users interacted with it."
+          },
+          {
+            "step": "Enrich with threat context",
+            "description": "Use OpenCTI to get full context on any matched IOC before escalating."
+          }
+        ],
+        "logSources": [
+          {
+            "source": "Firewall / Proxy",
+            "indicator": "Outbound connections to IOC IPs/Domains",
+            "query": "index=network dest_ip IN [ioc_list]"
+          },
+          {
+            "source": "DNS Logs",
+            "indicator": "DNS queries to malicious domains",
+            "query": "index=dns query IN [domain_ioc_list]"
+          },
+          {
+            "source": "EDR / Sysmon",
+            "indicator": "File hash matches from endpoint telemetry",
+            "query": "index=edr file_hash IN [hash_ioc_list]"
+          }
+        ]
+      },
+      "references": [],
+      "iocs": [
+        {
+          "type": "IP",
+          "value": "212.232.193.47",
+          "context": "VPN exit node associated with recent identity access broker activity."
+        }
+      ],
+      "hypotheses": [
+        {
+          "hypoName": "Hunt SCATTERED SPIDER IOC Activity",
+          "description": "Search for any signs of SCATTERED SPIDER infrastructure contact across your environment based on 1 IOCs from OpenCTI.",
+          "mitreId": "T1071.001",
+          "tactic": "Command and Control",
+          "platform": "Cross-Platform",
+          "dataSource": "Network Telemetry / Firewall / DNS / Proxy",
+          "actorContext": "These IOCs were ingested live from OpenCTI and attributed to SCATTERED SPIDER.",
+          "confidence": "Medium",
+          "source": "OpenCTI Live Feed",
+          "lastSeen": "2026-06-09",
+          "huntingLogic": "1. Load all 1 IOC values\n2. Search firewall logs for outbound connections\n3. Search DNS logs for domain queries\n4. Search EDR for hash matches\n5. Correlate hits with user/host identity",
+          "falsePositiveRisk": "LOW to MEDIUM — validate against known-good lists",
+          "truePositiveAction": "🚨 Block all SCATTERED SPIDER IOCs on perimeter\n🚨 Isolate any matching hosts\n🚨 Escalate to Incident Response",
+          "splunkSPL": "index=* earliest=-30d\n(\n  \"212.232.193.47\"\n)\n| stats count by host, src_ip, dest_ip\n| sort -count",
+          "sentinelKQL": "let iocs = dynamic([\"212.232.193.47\"]);\nCommonSecurityLog\n| where TimeGenerated > ago(30d)\n| where DestinationIP in (iocs) or DestinationHostName in (iocs)\n| summarize count() by SourceIP, DestinationIP, TimeGenerated\n| order by count_ desc"
+        }
+      ],
+      "generated_at": "2026-06-09T14:58:28.183354Z"
+    }
+  ],
+  "high_confidence_count": 3,
+  "summary": "Daily Proactive Intel Report covering 5 active threat campaigns, 5 unique IOCs across 5 threat actors. Breakdown: 2 ip, 2 domain, 1 hash. Key actors: VOLT TYPHOON, APT29, LOCKBIT 3.0, UNC5221, SCATTERED SPIDER.",
+  "download_url": null,
+  "source": "opencti_live"
+}

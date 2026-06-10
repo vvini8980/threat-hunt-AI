@@ -18,6 +18,10 @@ import HuntResults from './pages/HuntResults'
 import IOCReports from './pages/IOCReports'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
+import PipelineHealth from './pages/PipelineHealth'
+import Coverage from './pages/Coverage'
+import AIHub from './pages/AIHub'
+import QueryChecker from './pages/QueryChecker'
 
 // Using an inner component so we can use hooks from contexts if needed
 function AppRoutes() {
@@ -32,10 +36,14 @@ function AppRoutes() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
+            <Route path="/ai-hub" element={<AIHub />} />
             <Route path="/hypotheses" element={<Hypotheses />} />
             <Route path="/results" element={<HuntResults />} />
             <Route path="/ioc-reports" element={<IOCReports />} />
+            <Route path="/query-checker" element={<QueryChecker />} />
+            <Route path="/coverage" element={<Coverage />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/pipeline" element={<PipelineHealth />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </ErrorBoundary>

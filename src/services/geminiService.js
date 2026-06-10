@@ -1,4 +1,4 @@
-export const generateThreatIntel = async (apiKey, rawIntel, existingContext = []) => {
+export const generateThreatIntel = async (apiKey, rawIntel, existingContext = [], client = null) => {
   if (!apiKey) throw new Error('Gemini API key is required');
 
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -7,26 +7,38 @@ export const generateThreatIntel = async (apiKey, rawIntel, existingContext = []
     ? `\nEXISTING HYPOTHESES (DO NOT DUPLICATE):\nThe following hypotheses already exist in the user's library. Your newly generated attack and sub-hypotheses MUST be distinctly different and cover new ground. Do not repeat the same specific detection logics or hypothesis names.\n\n${existingContext.join('\n')}\n` 
     : '';
 
+  const clientContextSection = (client && client.environment_details)
+    ? `\nCLIENT SCHEMA CONTEXT:\nYou are generating queries for the client "${client.name}". You MUST use their specific data schema, indexes, and sourcetypes in your Splunk/Sentinel queries.\nClient Environment Details:\n${client.environment_details}\n`
+    : `\nCLIENT SCHEMA CONTEXT:\nNo specific client schema provided. Use standard enterprise defaults (e.g., index=windows sourcetype=sysmon).\n`;
+
   const prompt = `You are an elite, senior Threat Intelligence Analyst and Detection Engineer working in a Tier 3 SOC.
 I will provide you with a THREAT THEME.
 Your task is to autonomously select a real-world, highly-relevant Advanced Persistent Threat (APT), ransomware group, or major vulnerability that matches this theme. 
 Once selected, generate a comprehensive, highly realistic, and structured threat hunting payload matching the EXACT JSON schema requested.
 ${existingHypothesesSection}
+${clientContextSection}
+
 CRITICAL INSTRUCTIONS FOR ALL FIELDS (STRICT COMPLIANCE REQUIRED):
 
 1. REALISM & ACCURACY: Do NOT use generic placeholders like "1.1.1.1" or "example.com". Generate highly realistic (or historically accurate) IP addresses, file hashes, domains, and commands specific to the chosen threat actor.
 2. THE HYPOTHESIS FIELD (STRICT PHASES & NEWLINES):
 Break down the attack chain into highly specific, numbered phases (e.g., Initial Access, Discovery, C2).
 CRITICAL: You MUST use literal '\\n\\n' escape sequences in the JSON string to separate each phase so they render properly in the UI. 
-3. ALL SPLUNK SPL FIELDS (triageQuery, logSources.query, hypotheses.splunkSPL):
-Your Splunk queries MUST be highly advanced, realistic, and use multi-line formatting.
-CRITICAL: You MUST use literal '\\n' characters in the JSON string for line breaks inside the SPL so they render nicely. 'eval', 'stats', and 'table' commands MUST be on their own lines.
+3. SIEM QUERIES (splunkSPL, sentinelKQL, triageQuery, logSources.query):
+Your Splunk SPL and Microsoft Sentinel KQL queries MUST be highly advanced, realistic, and use multi-line formatting.
+CRITICAL: You MUST use literal '\\n' characters in the JSON string for line breaks inside the queries so they render nicely. 'eval', 'stats', 'summarize', and 'project' commands MUST be on their own lines.
 4. IOCs ARRAY:
 Provide at least 4 distinct IOCs (IP, DOMAIN, HASH, FILE) with deep context explaining exactly how the actor uses them.
 5. LOG SOURCES ARRAY:
 Provide exactly 3 log sources (e.g., Sysmon, Firewall, Windows Security). The indicators must be specific, and the query must use literal '\\n' formatting.
 6. HYPOTHESES ARRAY:
-Generate exactly 3 sub-hypotheses focusing on different tactics (e.g., Persistence, Lateral Movement, Exfiltration). Each must have a robust SPL query with literal '\\n' formatting.
+Generate exactly 1 highly detailed "Master Kill-Chain Hypothesis". This single hypothesis MUST comprehensively combine both IOC-driven and Behavior-driven hunting into one massive, master threat hunt.
+- Name: Give it an authoritative name (e.g., "Comprehensive APT29 Kill-Chain Master Hunt").
+- Description: Write a highly detailed paragraph explaining that this hunt targets both the static infrastructure (specific IPs, domains, hashes) AND the precise behavioral execution footprint (TTPs, process chains, anomalous registry keys) of the active campaign.
+- SIEM Queries (splunkSPL & sentinelKQL): You MUST write an advanced, multi-part master query using 'OR' logic. 
+  Part 1 of the query must explicitly search for the exact static IOCs you generated for this actor.
+  Part 2 of the query must search for the behavioral footprint (e.g., specific CommandLine arguments, unexpected child processes). 
+  CRITICAL: Use inline code comments (e.g., \`// --- PART 1: IOC MATCHING ---\`) inside the query to visually separate the two logic blocks, and use literal '\\n' for structural line breaks.
 
 JSON COMPLIANCE:
 Keep the output STRICTLY within the required JSON schema. Do NOT wrap the output in markdown (no \`\`\`json blocks). Just return the raw JSON object.
@@ -121,9 +133,10 @@ ${rawIntel}`;
             huntingLogic: { type: "STRING" },
             falsePositiveRisk: { type: "STRING" },
             truePositiveAction: { type: "STRING" },
-            splunkSPL: { type: "STRING" }
+            splunkSPL: { type: "STRING" },
+            sentinelKQL: { type: "STRING" }
           },
-          required: ["hypoName", "description", "mitreId", "tactic", "platform", "dataSource", "actorContext", "confidence", "source", "lastSeen", "huntingLogic", "falsePositiveRisk", "truePositiveAction", "splunkSPL"]
+          required: ["hypoName", "description", "mitreId", "tactic", "platform", "dataSource", "actorContext", "confidence", "source", "lastSeen", "huntingLogic", "falsePositiveRisk", "truePositiveAction", "splunkSPL", "sentinelKQL"]
         }
       }
     },
