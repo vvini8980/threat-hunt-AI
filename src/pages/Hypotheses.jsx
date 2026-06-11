@@ -2605,7 +2605,7 @@ export default function Hypotheses() {
                                 body: JSON.stringify({
                                   title: formData.title,
                                   description: formData.intelSummary,
-                                  hunting_logic: formData.splunk_query || formData.sentinel_kql || '',
+                                  hunting_logic: '',
                                   mitre_id: formData.mitre_id,
                                   mitre_tactic: formData.mitre_tactic,
                                   client_id: selectedClient.id
@@ -2938,6 +2938,53 @@ export default function Hypotheses() {
                             )}
                           </div>
                         </div>
+
+                        <button
+                          type="button"
+                          disabled={generatingQuery}
+                          onClick={async () => {
+                            if (!formData.title) { alert('Please enter a title first.'); return }
+                            setGeneratingQuery(true)
+                            try {
+                              const res = await fetch(`${API_BASE_URL}/hypotheses/generate-query`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  title: formData.title,
+                                  description: formData.intelSummary,
+                                  hunting_logic: '',
+                                  mitre_id: formData.mitre_id,
+                                  mitre_tactic: formData.mitre_tactic,
+                                  client_id: selectedClient.id
+                                })
+                              })
+                              const data = await res.json()
+                              if (!res.ok) throw new Error(data.detail || 'Generation failed')
+                              setFormData(prev => ({
+                                ...prev,
+                                splunk_query:  data.splunk_query  ?? prev.splunk_query,
+                                sentinel_kql:  data.sentinel_kql  ?? prev.sentinel_kql,
+                              }))
+                              if (data.siem_type === 'sentinel') setQueryTab('sentinel')
+                              else if (data.siem_type === 'both' || data.siem_type === 'splunk') setQueryTab('splunk')
+                            } catch (err) {
+                              alert('Gemini query generation failed: ' + err.message)
+                            } finally {
+                              setGeneratingQuery(false)
+                            }
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${
+                            generatingQuery
+                              ? 'bg-violet-500/20 text-violet-300/50 border-violet-500/20 cursor-wait animate-pulse'
+                              : 'bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border-violet-500/20 hover:shadow-[0_0_12px_rgba(139,92,246,0.2)]'
+                          }`}
+                        >
+                          {generatingQuery
+                            ? <><RefreshCw size={11} className="animate-spin" /> Generating...</>
+                            : <><Sparkles size={11} /> Generate with Gemini</>
+                          }
+                        </button>
+
                       </div>
                       {queryTab === 'splunk' && (
                         <div className="p-3">

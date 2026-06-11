@@ -116,6 +116,7 @@ Write a single valid Splunk SPL query that:
 3. Always ends with a | stats aggregation to prevent huge result floods
 4. Uses correct Splunk syntax (no made-up functions or field names)
 5. Uses field names from the Important Fields list if relevant
+6. CRITICAL: DO NOT just put the English description string inside a `search` command. You MUST translate the description into technical field filters (e.g. EventCode=1, process_name="quickassist.exe", etc.). Full English sentences inside SPL are strictly forbidden.
 
 === OUTPUT FORMAT ===
 Return ONLY the raw SPL query — no explanation, no markdown, no code fences.
@@ -195,7 +196,7 @@ Write a single valid Microsoft Sentinel KQL query that:
 3. Always includes a time filter: | where TimeGenerated > ago(30d)
 4. Always ends with a summarize or project aggregation
 5. Uses correct KQL syntax (no made-up operators or functions)
-6. Uses field names from the schema if listed
+6. CRITICAL: DO NOT just put the English description string inside a `search` or `where` command. You MUST translate the description into technical field filters (e.g. EventID == 4688, ProcessName == "quickassist.exe"). Full English sentences inside KQL are strictly forbidden.
 
 === OUTPUT FORMAT ===
 Return ONLY the raw KQL query — no explanation, no markdown, no code fences.

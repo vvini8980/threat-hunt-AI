@@ -94,7 +94,17 @@ def execute_hypothesis_tool(hypothesis_id: str, client_id: str = None) -> str:
             latest="now",
             platform="auto"
         )
-        return f"Successfully executed hunt! Found {result.get('total_events', 0)} events. Hunt Result ID: {result.get('hunt_result_id')}."
+        base_msg = f"Successfully executed hunt! Found {result.get('total_events', 0)} events. Hunt Result ID: {result.get('hunt_result_id')}."
+        
+        # Inject real events so the LLM doesn't hallucinate
+        events = result.get("events", [])
+        if events and isinstance(events, list):
+            import json
+            # Provide up to 3 events to the LLM to give it real data to talk about
+            sample_events = json.dumps(events[:3], indent=2)
+            base_msg += f"\n\nHere is a sample of the ACTUAL REAL raw events returned from the SIEM:\n{sample_events}\n\nDo NOT make up any fake events. ONLY summarize these real events."
+            
+        return base_msg
     except Exception as e:
         return f"Failed to execute hypothesis: {str(e)}"
 
@@ -183,7 +193,7 @@ async def agent_chat(req: ChatRequest):
 
     # Format history for Groq
     messages = [
-        {"role": "system", "content": "You are a senior SOC AI Assistant with direct access to the user's database. You must answer concisely. You MUST use the native tool calling API to search hypotheses, search IOCs, and execute hunts. DO NOT output raw function tags like <function=...> in your text. Always use the native tool structures provided."}
+        {"role": "system", "content": "You are a senior SOC AI Assistant with direct access to the user's database and SIEM. You must answer concisely. You MUST use the native tool calling API to search hypotheses, search IOCs, and execute hunts. DO NOT output raw function tags like <function=...> in your text. Always use the native tool structures provided. CRITICAL: NEVER hallucinate, fabricate, or make up dummy SIEM logs or dummy events. If a tool returns actual events, summarize ONLY those real events. If no events are returned, state that 0 events were found and do not invent scenarios."}
     ]
     for msg in req.messages:
         messages.append({"role": msg.role, "content": msg.content})
