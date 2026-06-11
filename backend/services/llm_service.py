@@ -224,6 +224,53 @@ SecurityEvent
         print(f"KQL generation failed: {e}")
         return f'SecurityEvent\n| where TimeGenerated > ago(30d)\n| where * has "{title}"\n| summarize count() by Computer'
 
+
+def fix_siem_query_with_llm(
+    bad_query: str,
+    error_message: str,
+    schema_block: str,
+    platform: str,
+) -> str:
+    """
+    If a generated or stored query fails execution, this function sends the bad query
+    and the SIEM error message back to the LLM to auto-correct it.
+    """
+    if not GEMINI_API_KEY:
+        return bad_query
+
+    language = "Splunk SPL" if platform == "splunk" else "Microsoft Sentinel KQL"
+    
+    prompt = f"""You are an elite {language} Detection Engineer.
+The following query was executed against the SIEM but failed with an error. Your job is to fix the query.
+
+=== CLIENT SCHEMA (for reference) ===
+{schema_block or 'No schema provided'}
+
+=== THE BAD QUERY ===
+{bad_query}
+
+=== THE ERROR MESSAGE FROM THE SIEM ===
+{error_message}
+
+=== YOUR TASK ===
+1. Analyze the error message to understand why the query failed (e.g., missing table, syntax error, unknown function).
+2. Rewrite the query so it is valid {language} and works within the client's schema.
+3. Return ONLY the fixed raw query. No markdown, no explanations, no code fences.
+"""
+
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        query = response.text.strip()
+        if query.startswith("```"):
+            query = "\n".join(query.split("\n")[1:])
+        if query.endswith("```"):
+            query = "\n".join(query.split("\n")[:-1])
+        return query.strip()
+    except Exception as e:
+        print(f"Query auto-fix failed: {e}")
+        return bad_query
+
 import requests
 
 def analyze_logs_with_ollama(ollama_url: str, query: str, events: list) -> str:
@@ -290,3 +337,52 @@ Provide a brief explanation of your reasoning (Analyst Notes).
             genai.configure(api_key=GEMINI_API_KEY)
         return f"Error connecting to Cloud AI (Gemini): {e}"
 
+import os
+import asyncio
+from groq import AsyncGroq
+from fastapi import HTTPException
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+class LLMService:
+    def __init__(self):
+        self.primary_model = "llama-3.3-70b-versatile"
+        self.fallback_model = "mixtral-8x7b-32768"
+        self.client = AsyncGroq(api_key=GROQ_API_KEY)
+
+    async def generate(self, system: str, user: str, json_mode: bool = False) -> str:
+        if json_mode:
+            system += "\nReturn only valid JSON. No explanation. No markdown. No backticks."
+
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ]
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.primary_model,
+                messages=messages,
+                temperature=0.0
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if "429" in str(e):
+                print("Rate limit hit (429) for Groq API. Sleeping 60 seconds and retrying with fallback model...")
+                await asyncio.sleep(60)
+                try:
+                    response = await self.client.chat.completions.create(
+                        model=self.fallback_model,
+                        messages=messages,
+                        temperature=0.0
+                    )
+                    return response.choices[0].message.content
+                except Exception as retry_e:
+                    raise HTTPException(status_code=503, detail="Groq LLM service unavailable after retry.")
+            else:
+                raise HTTPException(status_code=503, detail=f"Groq API error: {str(e)}")
+
+llm_service = LLMService()

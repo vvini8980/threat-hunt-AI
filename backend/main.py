@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from routers import auth, clients, hypotheses, hunt, ioc, reports, intel
+from routers import auth, clients, hypotheses, hunt, ioc, reports, intel, ai, agent
 
 from agents.scheduler import start_scheduler
 
@@ -34,6 +34,8 @@ app.include_router(hunt.router, prefix="/hunt", tags=["Hunt Execution"])
 app.include_router(ioc.router, prefix="/ioc", tags=["IOC Management"])
 app.include_router(reports.router, prefix="/reports", tags=["Reports"])
 app.include_router(intel.router, prefix="/intel", tags=["Proactive Intel"])
+app.include_router(ai.router)
+app.include_router(agent.router, prefix="/api/agent", tags=["Agent AI"])
 
 @app.get("/health")
 def health_check():

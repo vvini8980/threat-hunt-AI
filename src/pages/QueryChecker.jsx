@@ -1,10 +1,9 @@
 import React, { useState } from 'react'
 import { useClient } from '../context/ClientContext'
-
-const API_BASE_URL = 'http://localhost:8000'
+import { API_BASE_URL } from '../config/api'
 
 const QueryChecker = () => {
-  const { currentClient } = useClient()
+  const { selectedClient } = useClient()
   const [query, setQuery] = useState('')
   const [targetSiem, setTargetSiem] = useState('auto')
   const [loading, setLoading] = useState(false)
@@ -28,7 +27,7 @@ const QueryChecker = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          client_id: currentClient?.id || '',
+          client_id: selectedClient?.id || '',
           query: query,
           earliest: '-30d',
           latest: 'now',

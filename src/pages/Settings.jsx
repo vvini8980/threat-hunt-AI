@@ -63,7 +63,8 @@ export default function Settings() {
         .from('clients')
         .select(
           'contact_email,splunk_url,splunk_token,splunk_schema,splunk_indexes,splunk_sourcetypes,splunk_key_fields,' +
-          'sentinel_workspace_id,sentinel_tenant_id,sentinel_client_id,sentinel_client_secret,sentinel_schema'
+          'sentinel_workspace_id,sentinel_tenant_id,sentinel_client_id,sentinel_client_secret,sentinel_schema,' +
+          'primary_siem'
         )
         .eq('id', selectedClient.id)
         .single()
@@ -88,13 +89,13 @@ export default function Settings() {
         sentinel_client_id:     data?.sentinel_client_id     || '',
         sentinel_client_secret: data?.sentinel_client_secret || '',
         sentinel_schema:        data?.sentinel_schema        || '',
-        // Primary SIEM Preference
-        primary_siem:           local.primary_siem || 'splunk',
+        // Primary SIEM Preference — DB wins, then localStorage fallback
+        primary_siem: data?.primary_siem || local.primary_siem || 'splunk',
       })
 
-      // Auto-select tab
-      if (data?.sentinel_workspace_id && !data?.splunk_url) setSiemTab('sentinel')
-      else setSiemTab('splunk')
+      // Auto-select tab to match primary_siem from DB
+      const activeSiem = data?.primary_siem || local.primary_siem || 'splunk'
+      setSiemTab(activeSiem)
     } catch {
       setSettings(prev => ({ ...prev, notification_email: local.notification_email || selectedClient.contact_email || '', ...local }))
     }
@@ -116,6 +117,7 @@ export default function Settings() {
         sentinel_client_id:     settings.sentinel_client_id,
         sentinel_client_secret: settings.sentinel_client_secret,
         sentinel_schema:        settings.sentinel_schema,
+        primary_siem:           settings.primary_siem,   // ← persist tool choice
       }).eq('id', selectedClient.id)
 
       localStorage.setItem(`settings_${selectedClient.id}`, JSON.stringify(settings))

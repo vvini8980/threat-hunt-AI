@@ -3,6 +3,7 @@ import { FileDown, FileSpreadsheet, RefreshCw, Archive, Search, Target, Sparkles
 import { API_BASE_URL } from '../config/api'
 import { useClient } from '../context/ClientContext'
 import * as XLSX from 'xlsx'
+import AIChat from '../components/AIAssistant/AIChat'
 
 export default function IOCReports() {
   const { selectedClient } = useClient()
@@ -21,6 +22,8 @@ export default function IOCReports() {
   const [enrichingId, setEnrichingId] = useState(null)
   const [draftingId, setDraftingId] = useState(null)
   const [draftedIds, setDraftedIds] = useState([])
+  const [huntingIocId, setHuntingIocId] = useState(null)    // IOC being hunted right now
+  const [iocHuntResults, setIocHuntResults] = useState({})  // { iocId: { events, total_events, error } }
 
   // Export Modal State
   const [exportModalOpen, setExportModalOpen] = useState(false)
@@ -102,6 +105,33 @@ export default function IOCReports() {
       alert('Error drafting hunt: ' + err.message)
     } finally {
       setDraftingId(null)
+    }
+  }
+
+  // ─── Live Hunt: fire real Splunk/Sentinel search for an IOC ────────────────
+  const handleHuntNow = async (ioc) => {
+    if (!selectedClient) { alert('Please select a client first.'); return }
+    try {
+      setHuntingIocId(ioc.id)
+      setExpandedId(ioc.id)  // auto-expand to show results
+      const res = await fetch(`${API_BASE_URL}/hunt/ioc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: selectedClient.id,
+          ioc_type:  ioc.ioc_type?.toUpperCase() || 'IP',
+          ioc_value: ioc.value,
+          earliest:  '-30d',
+          latest:    'now',
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Hunt failed')
+      setIocHuntResults(prev => ({ ...prev, [ioc.id]: data }))
+    } catch (err) {
+      setIocHuntResults(prev => ({ ...prev, [ioc.id]: { error: err.message } }))
+    } finally {
+      setHuntingIocId(null)
     }
   }
 
@@ -372,6 +402,31 @@ export default function IOCReports() {
                         {new Date(ioc.report_date).toLocaleDateString()}
                       </td>
                       <td className="px-5 py-4 text-right space-x-2" onClick={e => e.stopPropagation()}>
+                        {/* Hunt Now — fires live Splunk/Sentinel search */}
+                        <button
+                          onClick={() => handleHuntNow(ioc)}
+                          disabled={huntingIocId === ioc.id}
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all mr-1 ${
+                            huntingIocId === ioc.id
+                              ? 'bg-orange-500/20 text-orange-400 border border-orange-500/20 animate-pulse cursor-wait'
+                              : iocHuntResults[ioc.id]
+                                ? iocHuntResults[ioc.id].error
+                                  ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/20'
+                          }`}
+                          title="Hunt this IOC in real-time against Splunk/Sentinel"
+                        >
+                          {huntingIocId === ioc.id
+                            ? <><RefreshCw size={11} className="animate-spin" /> Hunting...</>
+                            : iocHuntResults[ioc.id]
+                              ? iocHuntResults[ioc.id].error
+                                ? <><AlertTriangle size={11} /> Error</>
+                                : <><Target size={11} /> {iocHuntResults[ioc.id].total_events ?? 0} Hits</>
+                              : <><Target size={11} /> Hunt Now</>
+                          }
+                        </button>
+                        {/* Draft Hunt — creates a hypothesis */}
                         <button
                           onClick={() => handleDraftHunt(ioc.id)}
                           disabled={draftingId === ioc.id || draftedIds.includes(ioc.id)}
@@ -423,8 +478,66 @@ export default function IOCReports() {
                               </div>
                             </div>
 
+                            {/* Live Hunt Results Panel */}
+                            {(() => {
+                              const hr = iocHuntResults[ioc.id]
+                              return (
+                                <div className="lg:col-span-1 bg-orange-500/5 border border-orange-500/20 rounded-xl p-4 flex flex-col gap-3">
+                                  <h4 className="text-xs font-bold text-orange-400 uppercase tracking-wider flex items-center gap-2">
+                                    <Target size={13} /> Live Hunt Results
+                                    {huntingIocId === ioc.id && <RefreshCw size={11} className="animate-spin text-orange-400" />}
+                                  </h4>
+                                  {huntingIocId === ioc.id ? (
+                                    <div className="flex-1 flex items-center justify-center py-4 text-orange-400 text-xs animate-pulse">
+                                      Searching Splunk / Sentinel...
+                                    </div>
+                                  ) : hr ? (
+                                    hr.error ? (
+                                      <div className="text-red-400 text-xs bg-red-500/10 rounded-lg p-3 border border-red-500/20">
+                                        <AlertTriangle size={12} className="inline mr-1" />{hr.error}
+                                      </div>
+                                    ) : (
+                                      <div className="flex-1 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs text-textsecondary">Total Hits</span>
+                                          <span className={`font-mono font-bold text-sm ${hr.total_events > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                            {hr.total_events}
+                                          </span>
+                                        </div>
+                                        <div className="text-[10px] text-textsecondary font-mono bg-black/30 rounded p-2 border border-glass truncate" title={hr.query_used}>
+                                          SPL: {hr.query_used?.substring(0, 80)}...
+                                        </div>
+                                        {hr.events?.length > 0 && (
+                                          <div className="overflow-auto max-h-[120px] text-[10px] font-mono space-y-1">
+                                            {hr.events.slice(0, 5).map((ev, i) => (
+                                              <div key={i} className="bg-black/20 rounded px-2 py-1 border border-glass text-textprimary">
+                                                {ev._time && <span className="text-orange-300 mr-2">{ev._time?.substring(0,16)}</span>}
+                                                {ev.host && <span className="text-blue-300 mr-2">{ev.host}</span>}
+                                                {ev.src_ip && <span className="text-yellow-300 mr-2">src:{ev.src_ip}</span>}
+                                                {ev.dest_ip && <span className="text-red-300">dst:{ev.dest_ip}</span>}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center py-4 border border-dashed border-orange-500/20 rounded-lg bg-black/20 text-center gap-2">
+                                      <p className="text-xs text-textsecondary">Click Hunt Now to search live logs</p>
+                                      <button
+                                        onClick={() => handleHuntNow(ioc)}
+                                        className="px-3 py-1.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/30 text-xs font-bold transition-all flex items-center gap-1"
+                                      >
+                                        <Target size={11} /> Hunt Now
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })()}
+
                             {/* AI Enrichment Card */}
-                            <div className="lg:col-span-2 bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-4 flex flex-col">
+                            <div className="lg:col-span-1 bg-indigo-500/5 border border-indigo-500/10 rounded-xl p-4 flex flex-col">
                               <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                                 <Sparkles size={14} /> AI Context Enrichment
                                 {enrichingId === ioc.id && <RefreshCw size={12} className="animate-spin ml-2 text-indigo-400" />}
@@ -547,6 +660,13 @@ export default function IOCReports() {
           </div>
         </div>
       )}
+
+      {/* AI Floating Chat Assistant */}
+      <AIChat
+        context="ioc"
+        clientSlug={selectedClient?.slug || selectedClient?.id}
+        currentItem={iocs.find(i => i.id === expandedId) || null}
+      />
     </div>
   )
 }

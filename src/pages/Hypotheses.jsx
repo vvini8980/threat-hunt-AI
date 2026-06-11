@@ -7,6 +7,7 @@ import { useClient } from '../context/ClientContext'
 import { useAuth } from '../context/AuthContext'
 import * as XLSX from 'xlsx'
 import { ConfidenceBadge, TriageQueryBlock, HuntingSteps, LogSourcesTable, IOCCard } from '../components/AIHub/AttackCard'
+import AIChat from '../components/AIAssistant/AIChat'
 
 // ──────────────────────────────────────────────────
 // MITRE ATT&CK Tactics (common)
@@ -111,6 +112,108 @@ const HypothesisSkeleton = () => (
 )
 
 // ──────────────────────────────────────────────────
+// RowCard — ultra-compact 1-line row for 1000+ items
+// ──────────────────────────────────────────────────
+const RowCard = ({ hypo, isSelected, toggleSelection, handleApprove, updateStatus, handleDelete, handleToggleDaily, handleOpenEdit, handleTestSplunk, testingSplunkId }) => {
+  const statusConfig = {
+    draft:    { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', label: 'Draft' },
+    approved: { text: 'text-blue-400',  bg: 'bg-blue-500/10',  border: 'border-blue-500/20',  label: 'Ready' },
+    running:  { text: 'text-violet-400',bg: 'bg-violet-500/10',border: 'border-violet-500/20',label: 'Hunting' },
+    complete: { text: 'text-emerald-400',bg:'bg-emerald-500/10',border:'border-emerald-500/20',label: 'Done' },
+    error:    { text: 'text-red-400',   bg: 'bg-red-500/10',   border: 'border-red-500/20',   label: 'Query Error' },
+  }
+  const sc = hypo.rejected_reason
+    ? { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', label: 'Rejected' }
+    : (statusConfig[hypo.status] || statusConfig.draft)
+
+  const timeAgo = (dateStr) => {
+    if (!dateStr) return ''
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 60) return `${mins}m`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h`
+    return `${Math.floor(hrs / 24)}d`
+  }
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all group ${
+      isSelected ? 'bg-accent-primary/5 border-accent-primary/30' : 'border-glass hover:border-white/10 hover:bg-white/[0.02]'
+    }`}>
+      {/* Checkbox */}
+      <button onClick={() => toggleSelection(hypo.id)} className="shrink-0">
+        <div className={`w-[15px] h-[15px] rounded border flex items-center justify-center transition-all ${
+          isSelected ? 'bg-accent-primary border-accent-primary' : 'border-white/20 bg-black/20'
+        }`}>
+          {isSelected && <Check size={10} className="text-white" />}
+        </div>
+      </button>
+
+      {/* Daily Star */}
+      <button
+        onClick={() => handleToggleDaily(hypo.id, hypo.is_daily)}
+        className={`shrink-0 text-sm leading-none transition-all ${
+          hypo.is_daily ? 'text-amber-400' : 'text-white/10 hover:text-amber-400/50'
+        }`}
+      >★</button>
+
+      {/* MITRE ID */}
+      {hypo.mitre_id ? (
+        <span className="shrink-0 font-mono text-[10px] text-amber-400/80 bg-black/40 px-1.5 py-0.5 rounded border border-amber-500/10 w-[80px] text-center truncate">
+          {hypo.mitre_id}
+        </span>
+      ) : (
+        <span className="shrink-0 w-[80px]" />
+      )}
+
+      {/* Title */}
+      <span className="flex-1 text-[13px] font-medium text-textprimary truncate min-w-0">{hypo.title}</span>
+
+      {/* Tactic */}
+      {hypo.mitre_tactic && (
+        <span className="hidden md:block shrink-0 text-[10px] text-textsecondary w-[120px] truncate">{hypo.mitre_tactic}</span>
+      )}
+
+      {/* Time ago */}
+      <span className="shrink-0 text-[10px] text-textsecondary/60 w-[28px] text-right">{timeAgo(hypo.created_at)}</span>
+
+      {/* Status badge */}
+      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded border ${sc.bg} ${sc.text} ${sc.border} w-[60px] text-center`}>
+        {sc.label}
+      </span>
+
+      {/* Actions — visible on hover */}
+      <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {hypo.status === 'draft' && !hypo.rejected_reason && (
+          <button onClick={() => handleApprove(hypo.id)}
+            className="text-[10px] font-semibold text-emerald-400 hover:bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20 transition-all">
+            Approve
+          </button>
+        )}
+        {(hypo.splunk_query || hypo.sentinel_kql) && (
+          <button
+            onClick={() => handleTestSplunk(hypo.id)}
+            disabled={testingSplunkId === hypo.id}
+            className="text-[10px] font-semibold text-orange-400 hover:bg-orange-500/10 px-2 py-1 rounded-lg border border-orange-500/20 transition-all disabled:animate-pulse">
+            {testingSplunkId === hypo.id ? '...' : 'Hunt'}
+          </button>
+        )}
+        <button onClick={() => handleOpenEdit(hypo)}
+          className="text-[10px] text-textsecondary hover:text-accent-primary hover:bg-accent-primary/5 px-2 py-1 rounded-lg border border-glass transition-all">
+          Edit
+        </button>
+        <button onClick={() => handleDelete(hypo.id)}
+          className="text-[10px] text-textsecondary hover:text-red-400 hover:bg-red-500/5 px-2 py-1 rounded-lg border border-glass transition-all">
+          Del
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const PAGE_SIZE = 25
+
+// ──────────────────────────────────────────────────
 // HypothesisCard Component
 // ──────────────────────────────────────────────────
 const HypothesisCard = ({
@@ -157,6 +260,7 @@ const HypothesisCard = ({
     approved: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20', stripe: 'bg-blue-500', glow: 'shadow-[0_0_12px_rgba(59,130,246,0.08)]', icon: Target, label: 'Ready to Hunt' },
     running:  { bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/20', stripe: 'bg-violet-500', glow: 'shadow-[0_0_12px_rgba(139,92,246,0.08)]', icon: Activity, label: 'Hunting' },
     complete: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20', stripe: 'bg-emerald-500', glow: '', icon: CheckCircle2, label: 'Hunted' },
+    error:    { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20', stripe: 'bg-red-500', glow: '', icon: AlertTriangle, label: 'Query Error' },
   }
 
   const isRejected = !!hypo.rejected_reason
@@ -667,6 +771,9 @@ export default function Hypotheses() {
   const [selectedIds, setSelectedIds] = useState([])
   const [statusFilter, setStatusFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [tacticFilter, setTacticFilter] = useState('all')
+  const [currentPage, setCurrentPage] = useState(0)
+  const [viewMode, setViewMode] = useState('rows') // 'cards' | 'rows'
 
   // Time range for hunt execution
   const [timeRange, setTimeRange] = useState('-30d')
@@ -1479,9 +1586,9 @@ export default function Hypotheses() {
   // Day-wise workflow computed
   const workflowData = useMemo(() => {
     const selDateStr = selectedDate.toDateString()
-    // Today's queue: approved + daily scheduled
+    // Today's queue: approved + daily scheduled + error
     const todayQueue = hypotheses.filter(h =>
-      (h.status === 'approved' || h.is_daily) && !h.rejected_reason
+      (h.status === 'approved' || h.status === 'error' || h.is_daily) && !h.rejected_reason
     )
     // In progress
     const inProgress = hypotheses.filter(h => h.status === 'running')
@@ -1492,7 +1599,7 @@ export default function Hypotheses() {
       return updDate && updDate.toDateString() === selDateStr
     })
     // Draft queue
-    const draftQueue = hypotheses.filter(h => h.status === 'draft' && !h.rejected_reason)
+    const draftQueue = hypotheses.filter(h => (h.status === 'draft' || h.status === 'error') && !h.rejected_reason)
     // Progress calculation for today
     const todayTotal = todayQueue.length
     const todayDone = hypotheses.filter(h => h.status === 'complete').length
@@ -1511,12 +1618,16 @@ export default function Hypotheses() {
     } else if (activeTab === 'done') {
       filtered = workflowData.doneOnDate
     } else {
-      // 'all' tab — apply source + status sub-filters
+      // 'all' tab — apply status sub-filters
       filtered = hypotheses
       if (statusFilter === 'rejected') {
         filtered = filtered.filter(h => !!h.rejected_reason)
       } else if (statusFilter !== 'all') {
         filtered = filtered.filter(h => h.status === statusFilter && !h.rejected_reason)
+      }
+      // Tactic filter (only on all tab)
+      if (tacticFilter !== 'all') {
+        filtered = filtered.filter(h => (h.mitre_tactic || '').toLowerCase() === tacticFilter.toLowerCase())
       }
     }
 
@@ -1535,7 +1646,40 @@ export default function Hypotheses() {
     filtered = [...filtered].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
     return filtered
-  }, [hypotheses, activeTab, statusFilter, searchQuery, workflowData])
+  }, [hypotheses, activeTab, statusFilter, searchQuery, tacticFilter, workflowData])
+
+  // Pagination — only applied to the 'all' tab
+  const pagedHypos = useMemo(() => {
+    if (activeTab !== 'all') return displayHypos
+    return displayHypos.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
+  }, [displayHypos, currentPage, activeTab])
+
+  const totalPages = activeTab === 'all' ? Math.ceil(displayHypos.length / PAGE_SIZE) : 1
+
+  // MITRE Tactic counts from the filtered-but-untactic'd set (for the chip counts)
+  const tacticCounts = useMemo(() => {
+    if (activeTab !== 'all') return {}
+    let base = hypotheses
+    if (statusFilter === 'rejected') base = base.filter(h => !!h.rejected_reason)
+    else if (statusFilter !== 'all') base = base.filter(h => h.status === statusFilter && !h.rejected_reason)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      base = base.filter(h =>
+        (h.title || '').toLowerCase().includes(q) ||
+        (h.mitre_id || '').toLowerCase().includes(q) ||
+        (h.mitre_tactic || '').toLowerCase().includes(q)
+      )
+    }
+    const counts = {}
+    base.forEach(h => {
+      const t = h.mitre_tactic || 'Uncategorized'
+      counts[t] = (counts[t] || 0) + 1
+    })
+    return counts
+  }, [hypotheses, activeTab, statusFilter, searchQuery])
+
+  // Reset page when search/filter/tab changes
+  useEffect(() => { setCurrentPage(0) }, [searchQuery, statusFilter, tacticFilter, activeTab])
 
   // ── No client selected ──
   if (!selectedClient) {
@@ -1878,26 +2022,93 @@ export default function Hypotheses() {
 
         {/* All tab — sub-filters */}
         {activeTab === 'all' && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 pt-1 border-t border-glass flex-wrap">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Filter size={12} className="text-textsecondary" />
-              {[
-                { key: 'all', label: 'All', count: stats.total, color: 'bg-white/5 text-white border-white/10' },
-                { key: 'draft', label: 'Draft', count: stats.draft, color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-                { key: 'approved', label: 'Ready', count: stats.approved, color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
-                { key: 'running', label: 'Hunting', count: stats.running, color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
-                { key: 'complete', label: 'Done', count: stats.complete, color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-                { key: 'rejected', label: 'Rejected', count: stats.rejected, color: 'bg-red-500/10 text-red-400 border-red-500/20' },
-              ].map(f => (
-                <StatusPill key={f.key} label={f.label} count={f.count} active={statusFilter === f.key} onClick={() => setStatusFilter(f.key)} color={f.color} />
-              ))}
+          <div className="flex flex-col gap-2 pt-2 border-t border-glass">
+            {/* Row 1: Status pills + search + view toggle */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Filter size={12} className="text-textsecondary" />
+                {[
+                  { key: 'all', label: 'All', count: stats.total, color: 'bg-white/5 text-white border-white/10' },
+                  { key: 'draft', label: 'Draft', count: stats.draft, color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+                  { key: 'approved', label: 'Ready', count: stats.approved, color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+                  { key: 'running', label: 'Hunting', count: stats.running, color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
+                  { key: 'complete', label: 'Done', count: stats.complete, color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+                  { key: 'rejected', label: 'Rejected', count: stats.rejected, color: 'bg-red-500/10 text-red-400 border-red-500/20' },
+                ].map(f => (
+                  <StatusPill key={f.key} label={f.label} count={f.count} active={statusFilter === f.key} onClick={() => setStatusFilter(f.key)} color={f.color} />
+                ))}
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                {/* Search bar */}
+                <div className="relative">
+                  <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-textsecondary" />
+                  <input type="text" placeholder="Search title, MITRE, tactic..." value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-56 bg-white/[0.03] border border-glass rounded-xl pl-8 pr-7 py-1.5 text-xs text-textprimary focus:border-accent-primary focus:outline-none transition-all placeholder:text-textsecondary/50" />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-textsecondary hover:text-white">
+                      <XIcon size={11} />
+                    </button>
+                  )}
+                </div>
+                {/* View mode toggle */}
+                <div className="flex items-center bg-black/30 border border-glass rounded-lg p-0.5">
+                  <button
+                    onClick={() => setViewMode('rows')}
+                    title="Row view"
+                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                      viewMode === 'rows' ? 'bg-accent-primary/20 text-accent-primary' : 'text-textsecondary hover:text-textprimary'
+                    }`}>☰ Rows</button>
+                  <button
+                    onClick={() => setViewMode('cards')}
+                    title="Card view"
+                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${
+                      viewMode === 'cards' ? 'bg-accent-primary/20 text-accent-primary' : 'text-textsecondary hover:text-textprimary'
+                    }`}>⊞ Cards</button>
+                </div>
+              </div>
             </div>
-            <div className="relative ml-auto">
-              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-textsecondary" />
-              <input type="text" placeholder="Search title, MITRE, query..." value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-52 bg-white/[0.03] border border-glass rounded-xl pl-8 pr-3 py-1.5 text-xs text-textprimary focus:border-accent-primary focus:outline-none transition-all placeholder:text-textsecondary/50" />
-            </div>
+
+            {/* Row 2: MITRE Tactic chips */}
+            {Object.keys(tacticCounts).length > 0 && (
+              <div className="overflow-x-auto custom-scrollbar pb-1">
+                <div className="flex items-center gap-1.5 pb-1 min-w-max">
+                  <button
+                    onClick={() => setTacticFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all border ${
+                      tacticFilter === 'all'
+                        ? 'bg-white/10 text-white border-white/20'
+                        : 'bg-transparent border-glass text-textsecondary hover:text-textprimary hover:border-white/15'
+                    }`}
+                  >All Tactics ({displayHypos.length})</button>
+                  {Object.entries(tacticCounts)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([tactic, count]) => (
+                      <button
+                        key={tactic}
+                        onClick={() => setTacticFilter(tacticFilter === tactic ? 'all' : tactic)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all border whitespace-nowrap ${
+                          tacticFilter === tactic
+                            ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/30'
+                            : 'bg-transparent border-glass text-textsecondary hover:text-textprimary hover:border-white/15'
+                        }`}
+                      >{tactic} <span className="opacity-60">({count})</span></button>
+                    ))
+                  }
+                </div>
+              </div>
+            )}
+
+            {/* Result count */}
+            {!loading && (
+              <p className="text-[10px] text-textsecondary/60">
+                {searchQuery || tacticFilter !== 'all' || statusFilter !== 'all'
+                  ? `Showing ${displayHypos.length} of ${stats.total} hypotheses`
+                  : `${stats.total} hypotheses total`
+                }
+                {totalPages > 1 && ` · Page ${currentPage + 1} of ${totalPages}`}
+              </p>
+            )}
           </div>
         )}
 
@@ -1933,13 +2144,13 @@ export default function Hypotheses() {
       )}
 
       {/* ══════════ Hypothesis List ══════════ */}
-      <div className="space-y-3">
+      <div className={activeTab === 'all' && viewMode === 'rows' ? 'glass-panel border border-glass rounded-xl overflow-hidden' : 'space-y-3'}>
         {loading ? (
-          <>
+          <div className="space-y-3 p-2">
             <HypothesisSkeleton />
             <HypothesisSkeleton />
             <HypothesisSkeleton />
-          </>
+          </div>
         ) : displayHypos.length === 0 ? (
           <div className="py-16 text-center glass-panel rounded-2xl border border-glass">
             <div className="flex flex-col items-center gap-3">
@@ -1949,9 +2160,11 @@ export default function Hypotheses() {
               <p className="text-sm font-medium text-textsecondary">
                 {searchQuery
                   ? `No results for "${searchQuery}"`
-                  : statusFilter !== 'all'
-                    ? `No ${statusFilter} hypotheses found.`
-                    : 'No hunt hypotheses yet. Generate from threat intel or create your own.'
+                  : tacticFilter !== 'all'
+                    ? `No hypotheses for tactic "${tacticFilter}".`
+                    : statusFilter !== 'all'
+                      ? `No ${statusFilter} hypotheses found.`
+                      : 'No hunt hypotheses yet. Generate from threat intel or create your own.'
                 }
               </p>
               {!searchQuery && statusFilter === 'all' && (
@@ -1967,23 +2180,54 @@ export default function Hypotheses() {
               )}
             </div>
           </div>
+        ) : activeTab === 'all' && viewMode === 'rows' ? (
+          // ── ROW MODE: ultra-compact for 1000+ items ──
+          <div>
+            {/* Column headers */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-glass bg-white/[0.02] text-[10px] font-bold text-textsecondary uppercase tracking-wider">
+              <span className="w-[15px] shrink-0" />
+              <span className="w-[15px] shrink-0" />
+              <span className="w-[80px] shrink-0">MITRE</span>
+              <span className="flex-1">Hypothesis</span>
+              <span className="hidden md:block w-[120px] shrink-0">Tactic</span>
+              <span className="w-[28px] shrink-0 text-right">Age</span>
+              <span className="w-[60px] shrink-0 text-center">Status</span>
+              <span className="w-[140px] shrink-0" />
+            </div>
+            <div className="divide-y divide-white/[0.03]">
+              {pagedHypos.map(hypo => (
+                <RowCard
+                  key={hypo.id}
+                  hypo={hypo}
+                  isSelected={selectedIds.includes(hypo.id)}
+                  toggleSelection={toggleSelection}
+                  handleApprove={handleApprove}
+                  updateStatus={updateStatus}
+                  handleDelete={handleDelete}
+                  handleToggleDaily={handleToggleDaily}
+                  handleOpenEdit={handleOpenEdit}
+                  handleTestSplunk={handleTestSplunk}
+                  testingSplunkId={testingSplunkId}
+                />
+              ))}
+            </div>
+          </div>
         ) : (
+          // ── CARD MODE: full detail cards ──
           (() => {
             const grouped = [];
             let currentGroup = null;
+            const listToRender = activeTab === 'all' ? pagedHypos : displayHypos;
 
-            displayHypos.forEach((hypo, i) => {
+            listToRender.forEach((hypo, i) => {
               const dateObj = new Date(hypo.created_at);
               const today = new Date();
               const yesterday = new Date(today);
               yesterday.setDate(yesterday.getDate() - 1);
 
               let groupName = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-              if (dateObj.toDateString() === today.toDateString()) {
-                groupName = 'Today';
-              } else if (dateObj.toDateString() === yesterday.toDateString()) {
-                groupName = 'Yesterday';
-              }
+              if (dateObj.toDateString() === today.toDateString()) groupName = 'Today';
+              else if (dateObj.toDateString() === yesterday.toDateString()) groupName = 'Yesterday';
 
               if (currentGroup !== groupName) {
                 grouped.push({ type: 'header', label: groupName });
@@ -1992,7 +2236,7 @@ export default function Hypotheses() {
               grouped.push({ type: 'item', data: hypo, index: i });
             });
 
-            return grouped.map((item, i) => {
+            return grouped.map((item) => {
               if (item.type === 'header') {
                 return (
                   <div key={`header-${item.label}`} className="sticky top-[72px] z-10 pt-4 pb-2 bg-[#0a0a0a]/90 backdrop-blur-md">
@@ -2031,10 +2275,61 @@ export default function Hypotheses() {
         )}
       </div>
 
-      {/* Results count */}
-      {!loading && displayHypos.length > 0 && (
-        <div className="text-center text-[11px] text-textsecondary/60 py-2">
-          Showing {displayHypos.length} of {stats.total} hypotheses
+      {/* ══════════ Pagination Bar ══════════ */}
+      {!loading && activeTab === 'all' && totalPages > 1 && (
+        <div className="flex items-center justify-between gap-4 py-2">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+            disabled={currentPage === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-glass text-textsecondary hover:text-textprimary hover:border-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          >
+            <ChevronDown size={13} className="rotate-90" /> Prev
+          </button>
+
+          <div className="flex items-center gap-1">
+            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+              // Show pages around current
+              let pageNum
+              if (totalPages <= 7) {
+                pageNum = i
+              } else if (currentPage < 4) {
+                pageNum = i < 6 ? i : totalPages - 1
+              } else if (currentPage > totalPages - 5) {
+                pageNum = i === 0 ? 0 : totalPages - 7 + i
+              } else {
+                const offsets = [0, currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2, totalPages - 1]
+                pageNum = offsets[i]
+              }
+              const isEllipsis = i > 0 && pageNum - (Array.from({ length: Math.min(totalPages, 7) }, (_, j) => {
+                if (totalPages <= 7) return j
+                if (currentPage < 4) return j < 6 ? j : totalPages - 1
+                if (currentPage > totalPages - 5) return j === 0 ? 0 : totalPages - 7 + j
+                return [0, currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2, totalPages - 1][j]
+              })[i - 1]) > 1
+              return (
+                <>
+                  {isEllipsis && <span key={`ellipsis-${i}`} className="text-textsecondary text-xs px-1">…</span>}
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`min-w-[32px] h-[32px] rounded-lg text-xs font-semibold transition-all border ${
+                      currentPage === pageNum
+                        ? 'bg-accent-primary/20 text-accent-primary border-accent-primary/30'
+                        : 'border-glass text-textsecondary hover:text-textprimary hover:border-white/20'
+                    }`}
+                  >{pageNum + 1}</button>
+                </>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+            disabled={currentPage >= totalPages - 1}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-glass text-textsecondary hover:text-textprimary hover:border-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          >
+            Next <ChevronDown size={13} className="-rotate-90" />
+          </button>
         </div>
       )}
 
@@ -2823,6 +3118,13 @@ export default function Hypotheses() {
           </div>
         </div>
       )}
+
+      {/* AI Floating Chat Assistant */}
+      <AIChat
+        context="hypothesis"
+        clientSlug={selectedClient?.slug || selectedClient?.id}
+        currentItem={editingHypo || null}
+      />
     </div>
   )
 }

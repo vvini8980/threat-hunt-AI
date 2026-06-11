@@ -13,3 +13,5 @@ apscheduler
 
 azure-identity
 azure-monitor-query
+groq
+chromadb

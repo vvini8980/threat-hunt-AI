@@ -6,7 +6,7 @@ from typing import Optional
 from services.supabase_client import supabase
 from services.splunk_service import execute_splunk_query, test_splunk_connection, build_spl_query_from_schema
 from services.sentinel_service import execute_sentinel_query
-from services.llm_service import analyze_hunt_results_with_llm
+from services.llm_service import analyze_hunt_results_with_llm, generate_splunk_query, generate_sentinel_kql, fix_siem_query_with_llm
 import json
 import datetime
 
@@ -84,30 +84,88 @@ def _build_ioc_query(ioc_type: str, value: str, schema: str = "") -> str:
             f'| sort -count'
         )
 
+def _build_ioc_kql_query(ioc_type: str, value: str, schema: str) -> str:
+    """Builds an appropriate KQL query for hunting a specific IOC."""
+    v = value.replace('"', '\\"')
+    t = ioc_type.upper()
+
+    if t in ("IP", "IP ADDRESS"):
+        return (
+            f"search \"{v}\"\n"
+            f"| where RemoteIP == \"{v}\" or DestinationIP == \"{v}\" or SourceIP == \"{v}\" or IPAddress == \"{v}\"\n"
+            f"| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type, Computer"
+        )
+    elif t in ("DOMAIN", "HOSTNAME", "FQDN"):
+        return (
+            f"search \"{v}\"\n"
+            f"| where RemoteUrl contains \"{v}\" or DestinationHostName contains \"{v}\" or Query contains \"{v}\"\n"
+            f"| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type, Computer"
+        )
+    elif t in ("HASH", "MD5", "SHA1", "SHA256", "SHA-256"):
+        return (
+            f"search \"{v}\"\n"
+            f"| where SHA256 == \"{v}\" or SHA1 == \"{v}\" or MD5 == \"{v}\" or FileHash == \"{v}\"\n"
+            f"| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type, Computer, FileName"
+        )
+    elif t in ("FILE", "FILENAME", "FILE NAME"):
+        return (
+            f"search \"{v}\"\n"
+            f"| where FileName contains \"{v}\" or ProcessCommandLine contains \"{v}\" or TargetFileName contains \"{v}\"\n"
+            f"| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type, Computer, Account"
+        )
+    elif t in ("URL",):
+        return (
+            f"search \"{v}\"\n"
+            f"| where Url contains \"{v}\" or RemoteUrl contains \"{v}\" or RequestURL contains \"{v}\"\n"
+            f"| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type, Computer"
+        )
+    else:
+        # Generic fallback
+        return (
+            f"search \"{v}\"\n"
+            f"| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type, Computer"
+        )
+
 
 @router.post("/ioc")
 def hunt_ioc(req: IOCHuntRequest):
     """
-    Directly hunt for a specific IOC (IP/Domain/Hash/File) in Splunk.
+    Directly hunt for a specific IOC (IP/Domain/Hash/File) in the configured SIEM.
     Builds the type-appropriate query and returns results.
     No hypothesis required — fires direct from the Intel Feed.
     """
     try:
-        schema = _get_client_schema(req.client_id)
-        query = _build_ioc_query(req.ioc_type, req.ioc_value, schema)
+        cfg = _get_client_siem_config(req.client_id)
+        preferred = cfg["preferred"]
+        
+        # Build the right query
+        if preferred == "sentinel":
+            query = _build_ioc_kql_query(req.ioc_type, req.ioc_value, cfg["sentinel_schema"])
+        else:
+            query = _build_ioc_query(req.ioc_type, req.ioc_value, cfg["splunk_schema"])
 
-        result = execute_splunk_query(
-            query=query,
-            client_id=req.client_id,
-            earliest=req.earliest,
-            latest=req.latest,
-        )
+        # Execute
+        if preferred == "sentinel":
+            result = execute_sentinel_query(
+                query=query,
+                earliest=req.earliest,
+                latest=req.latest,
+                client_id=req.client_id,
+            )
+        else:
+            result = execute_splunk_query(
+                query=query,
+                client_id=req.client_id,
+                earliest=req.earliest,
+                latest=req.latest,
+            )
 
         return {
             "status": "success",
             "ioc_type": req.ioc_type,
             "ioc_value": req.ioc_value,
             "query_used": query,
+            "platform_used": preferred,
             "total_events": result.get("total_events", 0),
             "returned_events": result.get("returned_events", 0),
             "events": result.get("events", []),
@@ -119,17 +177,95 @@ def hunt_ioc(req: IOCHuntRequest):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Helper: load client schema from Supabase
+# Helper: load full client SIEM config from Supabase
 # ──────────────────────────────────────────────────────────────────────────────
+def _get_client_siem_config(client_id: str) -> dict:
+    """
+    Fetches the client's SIEM configuration from Supabase.
+
+    Routing priority (for platform='auto'):
+      1. client.primary_siem field  ← set by the user in Settings page
+      2. If both tools configured, primary_siem decides
+      3. If only one tool configured, use that one
+      4. If nothing configured, fall back to env defaults (mock mode)
+    """
+    defaults = {
+        "has_splunk":    False,
+        "has_sentinel":  False,
+        "preferred":     "none",
+        "primary_siem":  "splunk",
+        "splunk_url":    os.getenv("SPLUNK_URL", ""),
+        "splunk_token":  os.getenv("SPLUNK_TOKEN", ""),
+        "splunk_schema": "",
+        "sentinel_workspace_id":  os.getenv("AZURE_WORKSPACE_ID", ""),
+        "sentinel_tenant_id":     os.getenv("AZURE_TENANT_ID", ""),
+        "sentinel_client_id":     os.getenv("AZURE_CLIENT_ID", ""),
+        "sentinel_client_secret": os.getenv("AZURE_CLIENT_SECRET", ""),
+    }
+    if not supabase or not client_id:
+        # No DB — still check env for creds
+        defaults["has_splunk"]   = bool(defaults["splunk_url"] and defaults["splunk_token"])
+        defaults["has_sentinel"] = bool(defaults["sentinel_workspace_id"])
+        if defaults["has_splunk"]:   defaults["preferred"] = "splunk"
+        elif defaults["has_sentinel"]: defaults["preferred"] = "sentinel"
+        return defaults
+    try:
+        res = supabase.table("clients").select(
+            "splunk_url, splunk_token, splunk_schema, "
+            "splunk_indexes, splunk_sourcetypes, splunk_key_fields, "
+            "sentinel_workspace_id, sentinel_tenant_id, "
+            "sentinel_client_id, sentinel_client_secret, sentinel_schema, "
+            "vendor_log_sources, primary_siem"
+        ).eq("id", client_id).single().execute()
+        d = res.data or {}
+        cfg = dict(defaults)
+
+        # ── Splunk creds: DB overrides env ──
+        cfg["splunk_url"]    = d.get("splunk_url")    or os.getenv("SPLUNK_URL", "")
+        cfg["splunk_token"]  = d.get("splunk_token")  or os.getenv("SPLUNK_TOKEN", "")
+        cfg["splunk_schema"] = d.get("splunk_schema") or ""
+        cfg["splunk_indexes"] = d.get("splunk_indexes") or ""
+        cfg["splunk_sourcetypes"] = d.get("splunk_sourcetypes") or ""
+        cfg["splunk_key_fields"] = d.get("splunk_key_fields") or ""
+
+        # ── Sentinel creds: DB overrides env ──
+        cfg["sentinel_workspace_id"]  = d.get("sentinel_workspace_id")  or os.getenv("AZURE_WORKSPACE_ID", "")
+        cfg["sentinel_tenant_id"]     = d.get("sentinel_tenant_id")     or os.getenv("AZURE_TENANT_ID", "")
+        cfg["sentinel_client_id"]     = d.get("sentinel_client_id")     or os.getenv("AZURE_CLIENT_ID", "")
+        cfg["sentinel_client_secret"] = d.get("sentinel_client_secret") or os.getenv("AZURE_CLIENT_SECRET", "")
+        cfg["sentinel_schema"]        = d.get("sentinel_schema") or ""
+        
+        cfg["vendor_log_sources"]     = d.get("vendor_log_sources") or ""
+
+        # ── Compute has_* flags ──
+        cfg["has_splunk"]   = bool(cfg["splunk_url"] and cfg["splunk_token"])
+        cfg["has_sentinel"] = bool(cfg["sentinel_workspace_id"] and cfg["sentinel_tenant_id"])
+
+        # ── Determine preferred platform ──
+        # primary_siem from DB is the user's explicit choice in Settings → always honour it
+        db_primary = d.get("primary_siem") or "splunk"
+        cfg["primary_siem"] = db_primary
+
+        if db_primary == "sentinel" and cfg["has_sentinel"]:
+            cfg["preferred"] = "sentinel"
+        elif db_primary == "splunk" and cfg["has_splunk"]:
+            cfg["preferred"] = "splunk"
+        elif cfg["has_splunk"]:
+            # primary set to sentinel but no sentinel creds — fall back to splunk
+            cfg["preferred"] = "splunk"
+        elif cfg["has_sentinel"]:
+            cfg["preferred"] = "sentinel"
+        else:
+            cfg["preferred"] = "none"   # mock mode
+
+        return cfg
+    except Exception:
+        return defaults
+
+
 def _get_client_schema(client_id: str) -> str:
     """Returns splunk_schema from clients table, or default empty string."""
-    try:
-        if supabase:
-            res = supabase.table("clients").select("splunk_schema").eq("id", client_id).single().execute()
-            return res.data.get("splunk_schema") or ""
-    except Exception:
-        pass
-    return ""
+    return _get_client_siem_config(client_id).get("splunk_schema", "")
 
 
 def _save_hunt_result(client_id: str, hypothesis_id: str, splunk_result: dict, status: str = "running") -> dict:
@@ -235,41 +371,96 @@ def execute_hunt(
         if not active_client_id:
             raise HTTPException(status_code=400, detail="client_id must be provided for global hypotheses.")
             
-        schema = _get_client_schema(active_client_id)
+        cfg = _get_client_siem_config(active_client_id)
+        schema = cfg["splunk_schema"]
 
+        # ── Platform resolution ────────────────────────────────────────────────
         if platform == "auto":
-            # Check if we should execute sentinel instead
-            if hypothesis.get("sentinel_kql") and "summarize count() by" in hypothesis.get("sentinel_kql", ""):
-                query = hypothesis.get("sentinel_kql")
+            preferred = cfg["preferred"]
+            
+            if preferred == "sentinel":
+                query = hypothesis.get("sentinel_kql") or ""
                 platform = "sentinel"
             else:
                 query = hypothesis.get("splunk_query") or ""
                 platform = "splunk"
         elif platform == "sentinel":
             query = hypothesis.get("sentinel_kql") or ""
+            platform = "sentinel"
         else:
             query = hypothesis.get("splunk_query") or ""
             platform = "splunk"
 
-        if platform == "splunk" and (not query or len(query.strip()) < 10):
-            # Build a generic schema-aware query from the hypothesis description
-            tactic = hypothesis.get("tactic", hypothesis.get("title", ""))
-            query  = _fallback_query_from_schema(schema, tactic)
+        # ── Fallback query generation (if no query is saved) ───────────────────
+        generated_query = False
+        if not query or len(query.strip()) < 10:
+            generated_query = True
+            if platform == "sentinel":
+                query = generate_sentinel_kql(
+                    title=hypothesis.get("title", "Unknown Hunt"),
+                    description=hypothesis.get("description", ""),
+                    hunting_logic=hypothesis.get("hunting_logic", ""),
+                    mitre_id=hypothesis.get("mitre_id", ""),
+                    sentinel_schema=cfg.get("sentinel_schema", ""),
+                    vendor_log_sources=cfg.get("vendor_log_sources", ""),
+                )
+            else:
+                query = generate_splunk_query(
+                    title=hypothesis.get("title", "Unknown Hunt"),
+                    description=hypothesis.get("description", ""),
+                    hunting_logic=hypothesis.get("hunting_logic", ""),
+                    mitre_id=hypothesis.get("mitre_id", ""),
+                    splunk_schema=cfg.get("splunk_schema", ""),
+                    splunk_indexes=cfg.get("splunk_indexes", ""),
+                    splunk_sourcetypes=cfg.get("splunk_sourcetypes", ""),
+                    splunk_key_fields=cfg.get("splunk_key_fields", ""),
+                    vendor_log_sources=cfg.get("vendor_log_sources", ""),
+                )
 
-        # Execute against Splunk or Sentinel
-        if platform == "sentinel":
-            result = execute_sentinel_query(
-                query     = query,
-                earliest  = earliest,
-                latest    = latest,
+        # ── Execute ────────────────────────────────────────────────────────────
+        def _run_query(q):
+            if platform == "sentinel":
+                return execute_sentinel_query(
+                    query=q, earliest=earliest, latest=latest, client_id=active_client_id
+                )
+            else:
+                return execute_splunk_query(
+                    query=q, client_id=active_client_id, earliest=earliest, latest=latest
+                )
+
+        result = _run_query(query)
+
+        # ── Auto-Correction / Self-Healing (Up to 5 retries) ───────────────────
+        retries = 0
+        max_retries = 5
+        while result.get("error") and retries < max_retries:
+            schema_block = cfg.get("sentinel_schema", "") if platform == "sentinel" else cfg.get("splunk_schema", "")
+            fixed_query = fix_siem_query_with_llm(
+                bad_query=query,
+                error_message=result["error"],
+                schema_block=schema_block,
+                platform=platform
             )
-        else:
-            result = execute_splunk_query(
-                query     = query,
-                client_id = active_client_id,
-                earliest  = earliest,
-                latest    = latest,
-            )
+            
+            # Break early if the AI gave up or didn't change anything
+            if not fixed_query or fixed_query.strip() == query.strip():
+                break
+                
+            query = fixed_query
+            generated_query = True  # Flag as generated so the fix saves to the DB
+            result = _run_query(query)
+            retries += 1
+
+        # ── Save generated query ONLY if successful ────────────────────────────
+        if generated_query:
+            if not result.get("error"):
+                if supabase:
+                    field = "sentinel_kql" if platform == "sentinel" else "splunk_query"
+                    supabase.table("hypotheses").update({field: query, "status": "active" if result.get("total_events", 0) > 0 else "complete"}).eq("id", hypothesis_id).execute()
+            else:
+                result["error"] += f"\n(Note: The AI attempted to write/fix this query but it still failed execution after {retries} attempts. Please manually edit the Hypothesis to fix the query.)"
+                if supabase:
+                    supabase.table("hypotheses").update({"status": "error"}).eq("id", hypothesis_id).execute()
 
         # Persist result
         saved = _save_hunt_result(active_client_id, hypothesis_id, result, status="complete")
@@ -321,12 +512,26 @@ def execute_hunt_with_custom_query(
             raise HTTPException(status_code=400, detail="No query provided.")
 
         if platform == "auto":
-            # If it looks like KQL, run it against Sentinel
-            is_kql = "summarize" in query.lower() or "where" in query.lower() or "search" in query.lower()
-            platform = "sentinel" if is_kql else "splunk"
+            cfg = _get_client_siem_config(client_id)
+            preferred = cfg["preferred"]
+            
+            # Since this is a custom query, we just look at the query syntax if both are configured
+            if preferred == "sentinel" or preferred == "splunk":
+                # For custom query, if we prefer sentinel and they typed a query, we have to guess if it's KQL
+                kql_keywords = ["summarize", "extend", "project", "let ", "datatable", "timegenerated", "ingestiontime"]
+                is_kql = any(kw in query.lower() for kw in kql_keywords)
+                # But honor the preferred if it matches
+                if preferred == "sentinel" and is_kql:
+                    platform = "sentinel"
+                elif preferred == "splunk" and not is_kql:
+                    platform = "splunk"
+                else:
+                    platform = "sentinel" if is_kql else "splunk"
+            else:
+                 platform = "splunk"
         
         if platform == "sentinel":
-            result = execute_sentinel_query(query=query, earliest=earliest, latest=latest)
+            result = execute_sentinel_query(query=query, earliest=earliest, latest=latest, client_id=client_id)
         else:
             result = execute_splunk_query(query=query, client_id=client_id, earliest=earliest, latest=latest)
             
@@ -366,12 +571,18 @@ def test_query(payload: dict):
             raise HTTPException(status_code=400, detail="No query provided.")
             
         if platform == "auto":
-            # Detect platform based on KQL characteristics
-            is_kql = "summarize" in query.lower() or "where" in query.lower() or "search" in query.lower() or "datatable" in query.lower()
-            platform = "sentinel" if is_kql else "splunk"
+            cfg = _get_client_siem_config(client_id)
+            kql_keywords = ["summarize", "extend", "project", "let ", "datatable", "timegenerated", "ingestiontime"]
+            is_kql = any(kw in query.lower() for kw in kql_keywords)
+            if cfg["preferred"] == "sentinel":
+                platform = "sentinel"
+            elif cfg["preferred"] == "splunk":
+                platform = "splunk"
+            else:
+                platform = "sentinel" if is_kql else "splunk"
 
         if platform == "sentinel":
-            result = execute_sentinel_query(query=query, earliest=earliest, latest=latest)
+            result = execute_sentinel_query(query=query, earliest=earliest, latest=latest, client_id=client_id)
         else:
             if not client_id:
                 raise HTTPException(status_code=400, detail="client_id is required for Splunk queries.")
@@ -537,6 +748,35 @@ def _fallback_query_from_schema(schema: str, tactic: str) -> str:
     idx_filter = " OR ".join([f'index="{i}"' for i in set(indexes)])
     keyword    = tactic.replace('"', '').strip()
     return f'({idx_filter}) "{keyword}" | stats count values(host) AS hosts earliest(_time) AS first_seen by sourcetype | sort -count'
+
+
+def _fallback_kql_query_from_schema(schema: str, tactic: str) -> str:
+    """
+    Builds a minimal but schema-correct fallback KQL query when no KQL is stored.
+    Extracts table names from the user's Sentinel schema definition.
+    """
+    keyword = tactic.replace('"', '').strip()
+    if not schema:
+        return f'search "{keyword}"\n| summarize count() by Type, Computer'
+
+    tables = []
+    import re
+    for line in schema.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        # Heuristic: the first word of a line in the schema text box is usually the table name (e.g. "SecurityEvent -- Windows...")
+        table = line.split()[0]
+        # Ignore things that look like descriptions or generic words
+        if re.match(r'^[A-Za-z0-9_]+$', table) and table.lower() not in ('use', 'admin', 'index', 'sourcetype', 'note', 'the'):
+            tables.append(table)
+
+    if not tables:
+        return f'search "{keyword}"\n| summarize count() by Type, Computer'
+
+    # Create a targeted search across all discovered tables
+    table_list = ", ".join(set(tables))
+    return f'search in ({table_list}) "{keyword}"\n| summarize count(), min(TimeGenerated), max(TimeGenerated) by Type'
 
 
 from services.llm_service import analyze_logs_with_ollama, analyze_logs_with_gemini
